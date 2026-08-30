@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
+<!-- i18n-source-commit: 9880cfdfb6462fafe381b031a42c11b75f2437d6 -->
 
 # Puzzle 33: 텐서 코어 연산
 
@@ -72,7 +72,7 @@ mma_op.store_d(C_mma_tile, d_reg)           # Store result
 ## Mojo의 텐서 코어 API
 
 Mojo는
-[`TensorCore`](https://docs.modular.com/mojo/layout/tensor_core/TensorCore/)
+[`TensorCore`](https://max.modular.com/api/mojo/layout/tensor_core/TensorCore/)
 타입을 통해 텐서 코어에 대한 깔끔한 인터페이스를 제공합니다:
 
 ```mojo
@@ -93,7 +93,7 @@ mma_op = TensorCore[A.dtype, C.dtype, Index(MMA_M, MMA_N, MMA_K)]()
 스위즐 패턴(_역주: 공유 메모리의 뱅크 충돌을 피하기 위해 데이터 주소를 비트
 연산으로 재배치하는 기법_), 혼합 정밀도 연산도 지원합니다. 지원되는 모든 형태,
 데이터 타입, 메서드에 대한 전체 문서는
-[공식 TensorCore API 레퍼런스](https://docs.modular.com/mojo/layout/tensor_core/TensorCore/)를
+[공식 TensorCore API 레퍼런스](https://max.modular.com/api/mojo/layout/tensor_core/TensorCore/)를
 참고하세요.
 
 ### 행렬 프래그먼트 크기
@@ -300,12 +300,9 @@ Each 32×32 warp tile contains multiple 16×8 MMA fragments:
 **세 겹 중첩 루프 이해하기:**
 
 ```mojo
-@parameter
-for mma_k in range(BK // MMA_K):     # 32÷8 = 4 iterations (K dimension)
-    @parameter
-    for mma_m in range(WM // MMA_M): # 32÷16 = 2 iterations (M dimension)
-        @parameter
-        for mma_n in range(WN // MMA_N): # 32÷8 = 4 iterations (N dimension)
+comptime for mma_k in range(BK // MMA_K):     # 32÷8 = 4 iterations (K dimension)
+    comptime for mma_m in range(WM // MMA_M): # 32÷16 = 2 iterations (M dimension)
+        comptime for mma_n in range(WN // MMA_N): # 32÷8 = 4 iterations (N dimension)
             # YOUR CODE HERE: Process one 16×8×8 MMA fragment
 ```
 

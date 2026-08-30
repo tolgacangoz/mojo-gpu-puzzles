@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 """Check that problem skeletons stay in sync with their solutions.
 
@@ -65,7 +72,7 @@ EXCLUDED = {
 
 def _is_anchor(line: str) -> bool:
     s = line.strip()
-    return s.startswith("# ANCHOR:") or s.startswith("# ANCHOR_END:")
+    return s.startswith(("# ANCHOR:", "# ANCHOR_END:"))
 
 
 def _is_fill(line: str) -> bool:

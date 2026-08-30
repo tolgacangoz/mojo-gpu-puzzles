@@ -1,11 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -26,13 +33,14 @@ comptime LayoutType = type_of(layout)
 def prefix_sum_simple(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
-    var shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
+    var shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
     if global_i < size:
         shared[local_i] = a[global_i]
 
@@ -74,22 +82,26 @@ comptime ExtendedLayout = type_of(extended_layout)
 def prefix_sum_local_phase(
     output: TileTensor[mut=True, dtype, ExtendedLayout, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, Layout2Type, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
-    var shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
+    var shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
 
     # Load data into shared memory
     # Example with SIZE_2=15, TPB=8, BLOCKS=2:
     # Block 0 shared mem: [0,1,2,3,4,5,6,7]
-    # Block 1 shared mem: [8,9,10,11,12,13,14,uninitialized]
-    # Note: The last position remains uninitialized since global_i >= size,
-    # but this is safe because that thread doesn't participate in computation
+    # Block 1 shared mem: [8,9,10,11,12,13,14,0]
+    # The tail position has no input element. Zero it rather than leaving it
+    # uninitialized: the reduction below reads every position on every pass,
+    # and reading uninitialized memory is undefined behavior.
     if global_i < size:
         shared[local_i] = a[global_i]
+    else:
+        shared[local_i] = 0
 
     barrier()
 
@@ -101,7 +113,7 @@ def prefix_sum_local_phase(
     #   Block 0: [0,1,3+0,5+1,7+3,9+5,11+7,13+9] = [0,1,3,6,10,14,18,22]
     # Iteration 3 (offset=4):
     #   Block 0: [0,1,3,6,10+0,14+1,18+3,22+6] = [0,1,3,6,10,15,21,28]
-    #   Block 1 follows same pattern to get [8,17,27,38,50,63,77,???]
+    #   Block 1 follows same pattern to get [8,17,27,38,50,63,77,77]
     var offset = 1
     for _ in range(Int(log2(Scalar[dtype](TPB)))):
         var current_val: output.ElementType = 0
@@ -117,14 +129,14 @@ def prefix_sum_local_phase(
 
     # Write local results to output
     # Block 0 writes: [0,1,3,6,10,15,21,28]
-    # Block 1 writes: [8,17,27,38,50,63,77,???]
+    # Block 1 writes: [8,17,27,38,50,63,77,77]
     if global_i < size:
         output[global_i] = shared[local_i]
 
     # Store block sums in auxiliary space
     # Block 0: Thread 7 stores shared[7] == 28 at position size+0 (position 15)
-    # Block 1: Thread 7 stores shared[7] == ??? at position size+1 (position 16).  This sum is not needed for the final output.
-    # This gives us: [0,1,3,6,10,15,21,28, 8,17,27,38,50,63,77, 28,???]
+    # Block 1: Thread 7 stores shared[7] == 77 at position size+1 (position 16). This sum is not needed for the final output.
+    # This gives us: [0,1,3,6,10,15,21,28, 8,17,27,38,50,63,77, 28,77]
     #                                                           ↑  ↑
     #                                                     Block sums here
     if local_i == TPB - 1:
@@ -134,8 +146,9 @@ def prefix_sum_local_phase(
 # Kernel 2: Add block sums to their respective blocks
 def prefix_sum_block_sum_phase(
     output: TileTensor[mut=True, dtype, ExtendedLayout, MutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
 
     # Second pass: add previous block's sum to each element
@@ -173,13 +186,13 @@ def main() raises:
                 a_host[i] = Scalar[dtype](i)
 
         if use_simple:
-            a_tensor = TileTensor[mut=False, dtype, LayoutType](a, layout)
-            out_tensor = TileTensor(out, layout)
+            var a_tensor = TileTensor[mut=False, dtype, LayoutType](a, layout)
+            var out_tensor = TileTensor(out, layout)
 
             ctx.enqueue_function[prefix_sum_simple](
                 out_tensor,
                 a_tensor,
-                size,
+                Int32(size),
                 grid_dim=BLOCKS_PER_GRID,
                 block_dim=THREADS_PER_BLOCK,
             )
@@ -194,7 +207,7 @@ def main() raises:
             ctx.enqueue_function[prefix_sum_local_phase](
                 out_tensor,
                 a_tensor,
-                size,
+                Int32(size),
                 grid_dim=BLOCKS_PER_GRID_2,
                 block_dim=THREADS_PER_BLOCK_2,
             )
@@ -202,7 +215,7 @@ def main() raises:
             # Phase 2: Add block sums
             ctx.enqueue_function[prefix_sum_block_sum_phase](
                 out_tensor,
-                size,
+                Int32(size),
                 grid_dim=BLOCKS_PER_GRID_2,
                 block_dim=THREADS_PER_BLOCK_2,
             )

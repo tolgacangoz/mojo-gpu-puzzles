@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Part VI: GPU Warp Programming** introduces GPU **warp-level primitives** -
+**Part VII: GPU Warp Programming** introduces GPU **warp-level primitives** -
 hardware-accelerated operations that leverage synchronized thread execution
 within warps. You'll learn to use built-in warp operations to replace complex
 shared memory patterns with simple, efficient function calls.
@@ -37,6 +37,7 @@ GPU Block (e.g., 256 threads)
 
 - **32 threads per warp** on NVIDIA GPUs (`WARP_SIZE=32`)
 - **32 or 64 threads per warp** on AMD GPUs (`WARP_SIZE=32 or 64`)
+- **32 threads per SIMD-group** on Apple GPUs (`WARP_SIZE=32`)
 - **Lockstep execution**: All threads in a warp execute the same instruction
   simultaneously
 - **Zero synchronization cost**: Warp operations happen instantly within each
@@ -44,7 +45,7 @@ GPU Block (e.g., 256 threads)
 
 ### **Warp operations available in Mojo**
 
-Learn the core warp primitives from `gpu.primitives.warp`:
+Learn the core warp primitives from `std.gpu.primitives.warp`:
 
 1. **`sum(value)`**: Sum all values across warp lanes
 2. **`shuffle_idx(value, lane)`**: Get value from specific lane
@@ -57,17 +58,14 @@ Learn the core warp primitives from `gpu.primitives.warp`:
 ```mojo
 # 1. Reduction through shared memory
 # Complex pattern we have seen earlier (from p12.mojo):
-shared = TileTensor[
-    dtype,
-    row_major[WARP_SIZE](),
-    MutAnyOrigin,
-    address_space = AddressSpace.SHARED,
-].stack_allocation()
+var shared = stack_allocation[
+    dtype=dtype, address_space=AddressSpace.SHARED
+](row_major[WARP_SIZE]())
 shared[local_i] = partial_product
 barrier()
 
 # Safe tree reduction through shared memory requires a barrier after each reduction phase:
-stride = WARP_SIZE // 2
+var stride = WARP_SIZE // 2
 while stride > 0:
     if local_i < stride:
         shared[local_i] += shared[local_i + stride]
@@ -80,7 +78,7 @@ while stride > 0:
 # after each reduction phase.
 # Mojo's warp-level sum operation uses warp primitives under the hood and hides all this
 # complexity:
-total = sum(partial_product)  # Internally no barriers, no race conditions!
+var total = sum(partial_product)  # Internally no barriers, no race conditions!
 ```
 
 ### **When warp operations excel**
@@ -99,7 +97,7 @@ Massive (16K+)        Bottlenecked  Memory-bandwidth limited
 
 Before diving into warp programming, ensure you're comfortable with:
 
-- **Part V functional patterns**: Elementwise, tiled, and vectorized approaches
+- **Part VI functional patterns**: Elementwise, tiled, and vectorized approaches
 - **GPU thread hierarchy**: Understanding blocks, warps, and threads
 - **TileTensor operations**: Loading, storing, and tensor manipulation
 - **Shared memory concepts**: Why barriers and tree reduction are complex
@@ -138,8 +136,8 @@ Learn the most important warp operation through dot product implementation.
 **Key pattern:**
 
 ```mojo
-partial_result = compute_per_lane_value()
-total = sum(partial_result)  # Magic happens here!
+var partial_result = compute_per_lane_value()
+var total = sum(partial_result)  # Magic happens here!
 if lane_id() == 0:
     output[0] = total
 ```
@@ -195,7 +193,7 @@ sum implementation, and finish with the strategic decision framework.
 independent threads. This mental model will guide you toward effective warp
 programming patterns.
 
-**Learning objective**: By the end of Part VI, you'll recognize when warp
+**Learning objective**: By the end of Part VII, you'll recognize when warp
 operations can replace complex synchronization patterns, enabling you to write
 simpler, faster GPU code.
 

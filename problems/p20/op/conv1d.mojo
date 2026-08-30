@@ -1,12 +1,19 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 # same as p15/op/conv1d.mojo
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major, TensorLayout
 from layout.tile_tensor import stack_allocation
@@ -25,7 +32,7 @@ def conv1d_kernel[
     OutLayout: TensorLayout,
     InLayout: TensorLayout,
     ConvLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
     input: TileTensor[mut=True, dtype, InLayout, MutAnyOrigin],
@@ -37,12 +44,12 @@ def conv1d_kernel[
     var kernel_lt = kernel.to_layout_tensor()
     var output_lt = output.to_layout_tensor()
     # first: need to account for padding
-    var shared_a = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB + conv_size - 1]())
-    var shared_b = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[conv_size]())
+    var shared_a = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB + conv_size - 1]()
+    )
+    var shared_b = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[conv_size]()
+    )
     if global_i < input_size:
         shared_a[local_i] = rebind[Scalar[dtype]](input_lt[global_i])
 
@@ -74,14 +81,13 @@ def conv1d_kernel[
 
 # ANCHOR_END: conv1d_kernel
 
-import compiler
+import extensibility
 
 from extensibility import InputTensor, OutputTensor
-from std.memory import UnsafePointer
-from std.gpu.host import DeviceBuffer
+from max.gpu.host import DeviceBuffer
 
 
-@compiler.register("conv1d")
+@extensibility.register("conv1d")
 struct Conv1DCustomOp:
     @staticmethod
     def execute[
@@ -89,7 +95,7 @@ struct Conv1DCustomOp:
         target: StaticString,
         input_size: Int,
         conv_size: Int,
-        dtype: DType = DType.float32,
+        dtype: DType = .float32,
     ](
         output: OutputTensor[dtype=dtype, rank=1, static_spec=_],
         input: InputTensor[dtype=dtype, rank=output.rank, static_spec=_],

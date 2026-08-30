@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
+<!-- i18n-source-commit: 9880cfdfb6462fafe381b031a42c11b75f2437d6 -->
 
 # 타일링 버전
 
@@ -324,7 +324,7 @@ expected: HostBuffer([3672.0, 3744.0, 3816.0, 3888.0, 3960.0, 4032.0, 4104.0, 41
 
 3. **연산**:
    - 레지스터 기반 누적, 즉 `var acc: output.element_type = 0`
-   - `@parameter`를 통한 컴파일 타임 루프 전개
+   - `comptime for`를 통한 컴파일 타임 루프 전개
 
 이 구현은 다음을 통해 높은 성능을 달성합니다:
 
@@ -379,7 +379,7 @@ expected: HostBuffer([3672.0, 3744.0, 3816.0, 3888.0, 3960.0, 4032.0, 4104.0, 41
 
    수동 좌표 계산 없이 "(block_idx.y, block_idx.x) 위치의 타일을 가져온다"를
    직접 표현합니다. 자세한 내용은
-   [문서](https://docs.modular.com/mojo/layout/tile_tensor/TileTensor/#tile)를
+   [문서](https://max.modular.com/api/mojo/layout/tile_tensor/TileTensor/#tile)를
    참고하세요.
 
 2. **비동기 메모리 연산**
@@ -401,7 +401,7 @@ expected: HostBuffer([3672.0, 3744.0, 3816.0, 3888.0, 3960.0, 4032.0, 4104.0, 41
    이 연산들은:
    - 레지스터를 우회하는 전용 복사 엔진을 사용하여 연산과 메모리 전송의 중첩을
      가능하게 합니다
-     ([copy_dram_to_sram_async](https://docs.modular.com/mojo/layout/layout_tensor/copy_dram_to_sram_async/)
+     ([copy_dram_to_sram_async](https://max.modular.com/api/mojo/layout/layout_tensor/copy_dram_to_sram_async/)
      참고)
    - 최적의 메모리 접근 패턴을 위한 특화된 스레드 레이아웃을 사용합니다
    - 수동 메모리 초기화가 불필요합니다
@@ -462,8 +462,7 @@ expected: HostBuffer([3672.0, 3744.0, 3816.0, 3888.0, 3960.0, 4032.0, 4104.0, 41
 4. **완벽한 타일링으로 경계 검사 불필요**
 
    ```mojo
-   @parameter
-   for idx in range(size // TPB):  # 나머지 없는 나눗셈: 9 // 3 = 3
+   comptime for idx in range(size // TPB):  # 나머지 없는 나눗셈: 9 // 3 = 3
    ```
 
    \\((9 \times 9)\\) 행렬과 \\((3 \times 3)\\) 타일에서는 모든 타일이 정확히 꽉

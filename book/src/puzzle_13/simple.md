@@ -1,7 +1,8 @@
-# Simple Case with Single Block
+# Simple Version with Single Block
 
-Implement a kernel that computes a 1D convolution between 1D TileTensor `a` and
-1D TileTensor `b` and stores it in 1D TileTensor `output`.
+Implement a GPU kernel that computes a 1D convolution between input 1D
+TileTensor `a` and filter 1D TileTensor `b`, storing the result in 1D
+TileTensor `output`.
 
 **Note:** _You need to handle the general case. You only need 2 global reads and
 1 global write per thread._
@@ -20,15 +21,16 @@ while maintaining correct boundary conditions.
 ## Configuration
 
 - Input array size: `SIZE = 6` elements
-- Kernel size: `CONV = 3` elements
+- Filter size: `CONV = 3` elements
 - Threads per block: `TPB = 8`
 - Number of blocks: 1
 - Shared memory: Two arrays of size `SIZE` and `CONV`
 
 Notes:
 
-- **Data loading**: Each thread loads one element from input and kernel
-- **Memory pattern**: Shared arrays for input and convolution kernel
+- **Data loading**: Each thread loads one input element; the first `CONV`
+  threads also load one filter element
+- **Memory pattern**: Shared arrays for input and filter
 - **Thread sync**: Coordination before computation
 
 ## Code to complete
@@ -47,7 +49,7 @@ Notes:
 1. Use
    `stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[SIZE]())`
    for shared memory allocation
-2. Load input to `shared_a[local_i]` and kernel to `shared_b[local_i]`
+2. Load input to `shared_a[local_i]` and filter to `shared_b[local_i]`
 3. Call `barrier()` after loading
 4. Sum products within bounds: `if local_i + j < SIZE`
 5. Write result if `global_i < SIZE`
@@ -121,7 +123,7 @@ access to overlapping elements. Here's a detailed breakdown:
 
 ```txt
 Input array a:   [0  1  2  3  4  5]
-Kernel b:        [0  1  2]
+Filter b:        [0  1  2]
 ```
 
 ### Computation steps
@@ -130,7 +132,7 @@ Kernel b:        [0  1  2]
 
    ```txt
    shared_a: [0  1  2  3  4  5]  // Input array
-   shared_b: [0  1  2]           // Convolution kernel
+   shared_b: [0  1  2]           // Filter
    ```
 
 2. **Convolution Process** for each position i:
@@ -151,7 +153,7 @@ Kernel b:        [0  1  2]
 
      ```mojo
      # Inefficient version - all threads compute even when results won't be used
-     local_sum = Scalar[dtype](0)
+     var local_sum = Scalar[dtype](0)
      for j in range(CONV):
          if local_i + j < SIZE:
              local_sum += shared_a[local_i + j] * shared_b[j]
@@ -160,40 +162,39 @@ Kernel b:        [0  1  2]
          output[global_i] = local_sum
      ```
 
-   - The efficient and correct implementation:
+   - The efficient approach with a single thread guard:
 
      ```mojo
      if global_i < SIZE:
-         var local_sum: output.element_type = 0  # Using var allows type inference
-         @parameter  # Unrolls loop at compile time since CONV is constant
-         for j in range(CONV):
+         var local_sum: output.ElementType = 0  # Using var allows type inference
+         comptime for j in range(CONV):  # Unrolls loop at compile time since CONV is constant
              if local_i + j < SIZE:
                  local_sum += shared_a[local_i + j] * shared_b[j]
          output[global_i] = local_sum
      ```
 
-The key difference is that the inefficient version has
-**all threads perform the convolution computation** (including those where
-`global_i >= SIZE`), and only the final write is guarded. This leads to:
+   The key difference is that the inefficient version lets
+   **every thread run the convolution loop** (including those where
+   `global_i >= SIZE`) and guards only the final write. Here the per-element
+   check `local_i + j < SIZE` already zeroes out the work for threads 6 and 7,
+   so the two versions do the same arithmetic; what the outer guard buys is a
+   single, explicit statement of which threads are in play, rather than a
+   bounds condition smeared across the loop body and the write.
 
-   - **Wasteful computation**: Threads beyond the valid range still perform
-     unnecessary work
-   - **Reduced efficiency**: Extra computations that won't be used
-   - **Poor resource utilization**: GPU cores working on meaningless
-     calculations
-
-The efficient version ensures that only threads with valid `global_i` values
-perform any computation, making better use of GPU resources.
+   Don't expect the guard to buy back time on the hardware, though. Threads in
+   a warp issue instructions in lockstep, so masking off two threads out of
+   eight neither costs nor saves the warp anything. A guard like this starts to
+   pay only when whole warps fall outside the valid range.
 
 2. **Key Implementation Features**:
-   - Uses `var` for proper type inference with `output.element_type`
-   - Employs `@parameter` decorator to unroll the convolution loop at compile
+   - Uses `var` for proper type inference with `output.ElementType`
+   - Employs `comptime for` to unroll the convolution loop at compile
      time
    - Maintains strict bounds checking for memory safety
    - Leverages TileTensor's type system for better code safety
 
 3. **Memory Management**:
-   - Uses shared memory for both input array and kernel
+   - Uses shared memory for both input array and filter
    - Single load per thread from global memory
    - Efficient reuse of loaded data
 
@@ -205,8 +206,7 @@ perform any computation, making better use of GPU resources.
 5. **Performance Optimizations**:
    - Minimizes global memory access
    - Uses shared memory for fast data access
-   - Avoids thread divergence in main computation loop
-   - Loop unrolling through `@parameter` decorator
+   - Loop unrolling through `comptime for`
 
 </div>
 </details>

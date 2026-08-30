@@ -1,7 +1,8 @@
 # Block Boundary Version
 
-Implement a kernel that computes a 1D convolution between 1D TileTensor `a` and
-1D TileTensor `b` and stores it in 1D TileTensor `output`.
+Implement a GPU kernel that computes a 1D convolution between input 1D
+TileTensor `a` and filter 1D TileTensor `b`, storing the result in 1D
+TileTensor `output`.
 
 **Note:** _You need to handle the general case. You only need 2 global reads and
 1 global write per thread._
@@ -9,7 +10,7 @@ Implement a kernel that computes a 1D convolution between 1D TileTensor `a` and
 ## Configuration
 
 - Input array size: `SIZE_2 = 15` elements
-- Kernel size: `CONV_2 = 4` elements
+- Filter size: `CONV_2 = 4` elements
 - Threads per block: `TPB = 8`
 - Number of blocks: 2
 - Shared memory: `TPB + CONV_2 - 1` elements for input
@@ -39,7 +40,7 @@ Notes:
    for shared memory
 2. Load main data: `shared_a[local_i] = a[global_i]`
 3. Load boundary: `if local_i < CONV_2 - 1` handle next block data
-4. Load kernel: `shared_b[local_i] = b[local_i]`
+4. Load filter: `shared_b[local_i] = b[local_i]`
 5. Sum within input bounds: `if global_i + j < SIZE_2`
 
 </div>
@@ -113,7 +114,7 @@ shared memory. Here's a detailed analysis:
 Test Configuration:
 - Full array size: SIZE_2 = 15 elements
 - Grid: 2 blocks × 8 threads
-- Convolution kernel: CONV_2 = 4 elements
+- Filter size: CONV_2 = 4 elements
 
 Block 0 shared memory:  [0 1 2 3 4 5 6 7|8 9 10]  // TPB(8) + (CONV_2-1)(3) padding
 Block 1 shared memory:  [8 9 10 11 12 13 14 0|0 0 0]  // Second block. data(7) + padding to fill grid(1) + (CONV_2-1)(3) padding
@@ -130,8 +131,8 @@ Size calculation:
 
    ```mojo
    # First: account for padding needed for convolution window
-   shared_a = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[TPB + CONV_2 - 1]())
-   shared_b = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[CONV_2]())
+   var shared_a = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[TPB + CONV_2 - 1]())
+   var shared_b = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[CONV_2]())
    ```
 
    This allocation pattern ensures we have enough space for both the block's
@@ -148,7 +149,7 @@ Size calculation:
 
    # Boundary data from next block
    if local_i < CONV_2 - 1:
-       next_idx = global_i + TPB
+       var next_idx = global_i + TPB
        if next_idx < SIZE_2:
            shared_a[TPB + local_i] = a[next_idx]
        else:
@@ -158,33 +159,32 @@ Size calculation:
    ```
 
    - Only threads with `local_i < CONV_2 - 1` load boundary data
-   - Prevents unnecessary thread divergence
+   - Avoids redundant halo loads, at the cost of one short divergent branch
    - Maintains memory coalescing for main data load
    - Explicitly zeroes out-of-bounds elements to avoid undefined behavior
 
-3. **Kernel Loading**:
+3. **Filter Loading**:
 
    ```mojo
-   if local_i < b_size:
+   if local_i < CONV_2:
        shared_b[local_i] = b[local_i]
    ```
 
    - Single load per thread
-   - Bounded by kernel size
+   - Bounded by filter size
 
 4. **Convolution Computation**:
 
    ```mojo
    if global_i < SIZE_2:
-       var local_sum: output.element_type = 0
-       @parameter
-       for j in range(CONV_2):
+       var local_sum: output.ElementType = 0
+       comptime for j in range(CONV_2):
            if global_i + j < SIZE_2:
                local_sum += shared_a[local_i + j] * shared_b[j]
    ```
 
-   - Uses `@parameter` for compile-time loop unrolling
-   - Proper type inference with `output.element_type`
+   - Uses `comptime for` for compile-time loop unrolling
+   - Proper type inference with `output.ElementType`
    - Semantically correct bounds check: only compute convolution for valid input
      positions
 
@@ -201,17 +201,18 @@ Size calculation:
    ```
 
 2. **Block 1 Access Pattern**:
-Note how starting from thread 4, `global_i + j < SIZE_2` evaluates to `False`
-and hence iterations are skipped.
+
+   Note how starting from thread 4, `global_i + j < SIZE_2` evaluates to
+   `False` and hence iterations are skipped.
 
    ```txt
    Thread 0: [8  9 10 11] × [0 1 2 3]
    Thread 1: [9 10 11 12] × [0 1 2 3]
    ...
-   Thread 4: [12 13 14] × [0 1 2]       // Zero padding at end
+   Thread 4: [12 13 14] × [0 1 2]       // Tail of the array
    Thread 5: [13 14]    × [0 1]
    Thread 6: [14]       × [0]
-   Thread 7: skipped                    // global_i + j < SIZE_2 evaluates to false for all j, no computation
+   Thread 7: skipped                    // global_i = 15 fails global_i < SIZE_2, no output
    ```
 
 ### Performance optimizations
@@ -223,7 +224,7 @@ and hence iterations are skipped.
 
 2. **Thread Divergence Minimization**:
    - Clean separation of main and boundary loading
-   - Uniform computation pattern within warps
+   - Divergence confined to the halo load and the tail of the array
    - Efficient bounds checking
 
 3. **Shared Memory Usage**:

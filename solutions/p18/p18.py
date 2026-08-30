@@ -1,7 +1,14 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 from pathlib import Path
 
@@ -37,7 +44,7 @@ def softmax(
         input_value = graph.inputs[0]
 
         # The output shape is the same as the input for softmax
-        # Note: the name must match the name used in `@compiler.register("softmax")` in op/softmax.mojo
+        # Note: the name must match the name used in `@extensibility.register("softmax")` in op/softmax.mojo
         output = ops.custom(
             name="softmax",
             values=[input_value],

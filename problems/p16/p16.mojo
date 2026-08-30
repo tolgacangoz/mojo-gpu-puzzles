@@ -1,11 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -137,11 +144,11 @@ def main() raises:
             )
         elif argv()[1] == "--tiled":
             # Need to update the layout of the tensors to the tiled layout
-            out_tensor_tiled = TileTensor(out, layout_tiled)
-            a_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
+            var out_tensor_tiled = TileTensor(out, layout_tiled)
+            var a_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
                 inp1, layout_tiled
             )
-            b_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
+            var b_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
                 inp2, layout_tiled
             )
 

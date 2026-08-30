@@ -6,7 +6,7 @@ primitive enables efficient parallel reductions, sorting networks, and advanced
 coordination algorithms without shared memory or explicit synchronization.
 
 **Key insight:** _The
-[shuffle_xor()](https://docs.modular.com/mojo/std/gpu/primitives/warp/shuffle_xor)
+[shuffle_xor()](https://mojolang.org/docs/std/gpu/primitives/warp/shuffle_xor/)
 operation leverages SIMT execution to create XOR-based communication trees,
 enabling efficient butterfly networks and parallel algorithms that scale with
 \\(O(\\log n)\\) complexity relative to warp size._
@@ -32,16 +32,17 @@ In this puzzle, you'll learn:
 The `shuffle_xor` operation enables each lane to exchange data with lanes based
 on [XOR](https://en.wikipedia.org/wiki/Exclusive_or) patterns: \\[\\Large
 \text{shuffle\_xor}(\text{value}, \text{mask}) =
-\text{value_from_lane}(\text{lane\_id} \oplus \text{mask})\\]
+\text{value from lane }(\text{lane\_id} \oplus \text{mask})\\]
 
 This transforms complex parallel algorithms into elegant butterfly communication
 patterns, enabling efficient tree reductions and sorting networks without
 explicit coordination.
 
 > **Scope:** `shuffle_xor()` exchanges data *within a single warp*. Every
-> reduction and butterfly here is per-warp; the results are global only because
-> each section runs a single warp over the data. There is no cross-warp or
-> cross-block communication.
+> reduction and butterfly here is per-warp. Sections 1 and 2 run a single warp,
+> so their per-warp results are also the global ones; section 3 launches two
+> blocks of `WARP_SIZE` threads, and each warp reduces its own half
+> independently. There is no cross-warp or cross-block communication.
 
 ## 1. Basic butterfly pair swap
 
@@ -61,12 +62,13 @@ Traditional pair swapping requires complex indexing and coordination:
 # Traditional approach - complex and requires synchronization
 shared_memory[lane] = input[global_i]
 barrier()
+var partner: Int
 if lane % 2 == 0:
     partner = lane + 1
 else:
     partner = lane - 1
 if partner < WARP_SIZE:
-    swapped_val = shared_memory[partner]
+    var swapped_val = shared_memory[partner]
 ```
 
 **Problems with traditional approach:**
@@ -80,15 +82,16 @@ With `shuffle_xor()`, pair swapping becomes elegant:
 
 ```mojo
 # Butterfly XOR approach - simple and hardware-optimized
-current_val = input[global_i]
-swapped_val = shuffle_xor(current_val, 1)  # XOR with 1 creates pairs
+var current_val = input[global_i]
+var swapped_val = shuffle_xor(current_val, 1)  # XOR with 1 creates pairs
 output[global_i] = swapped_val
 ```
 
 **Benefits of shuffle_xor:**
 
 - **Zero memory overhead**: Direct register-to-register communication
-- **No synchronization**: SIMT execution guarantees correctness
+- **No barrier needed**: The shuffle instruction synchronizes the lanes it reads
+  from, so no `barrier()` call is required
 - **Hardware optimized**: Single instruction for all lanes
 - **Butterfly foundation**: Building block for complex parallel algorithms
 
@@ -105,7 +108,7 @@ This transforms input data `[0, 1, 2, 3, 4, 5, 6, 7, ...]` into pairs
 XOR communication.
 
 ```mojo
-{{#include ../../../problems/p26/p26.mojo:butterfly_pair_swap_solution}}
+{{#include ../../../problems/p26/p26.mojo:butterfly_pair_swap}}
 ```
 
 <a href="{{#include ../_includes/repo_url.md}}/blob/main/problems/p26/p26.mojo" class="filename">View full file: problems/p26/p26.mojo</a>
@@ -197,7 +200,8 @@ WARP_SIZE:  32
 SIZE:  32
 output: [1.0, 0.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 9.0, 8.0, 11.0, 10.0, 13.0, 12.0, 15.0, 14.0, 17.0, 16.0, 19.0, 18.0, 21.0, 20.0, 23.0, 22.0, 25.0, 24.0, 27.0, 26.0, 29.0, 28.0, 31.0, 30.0]
 expected: [1.0, 0.0, 3.0, 2.0, 5.0, 4.0, 7.0, 6.0, 9.0, 8.0, 11.0, 10.0, 13.0, 12.0, 15.0, 14.0, 17.0, 16.0, 19.0, 18.0, 21.0, 20.0, 23.0, 22.0, 25.0, 24.0, 27.0, 26.0, 29.0, 28.0, 31.0, 30.0]
-✅ Butterfly pair swap test passed!
+Butterfly pair swap test: passed
+Puzzle 26 complete ✅
 ```
 
 ### Solution
@@ -218,8 +222,8 @@ through XOR communication patterns.
 
 ```mojo
 if global_i < size:
-    current_val = input[global_i]              # Each lane reads its element
-    swapped_val = shuffle_xor(current_val, 1)  # XOR creates pair exchange
+    var current_val = input[global_i]              # Each lane reads its element
+    var swapped_val = shuffle_xor(current_val, 1)  # XOR creates pair exchange
 
     # For demonstration, store the swapped value
     output[global_i] = swapped_val
@@ -228,7 +232,7 @@ if global_i < size:
 **SIMT execution deep dive:**
 
 ```text
-Cycle 1: All lanes load their values simultaneously
+Step 1: All lanes load their values
   Lane 0: current_val = input[0] = 0
   Lane 1: current_val = input[1] = 1
   Lane 2: current_val = input[2] = 2
@@ -236,7 +240,7 @@ Cycle 1: All lanes load their values simultaneously
   ...
   Lane 31: current_val = input[31] = 31
 
-Cycle 2: shuffle_xor(current_val, 1) executes on all lanes
+Step 2: shuffle_xor(current_val, 1) executes on all lanes
   Lane 0: receives from Lane 1 (0⊕1=1) → swapped_val = 1
   Lane 1: receives from Lane 0 (1⊕1=0) → swapped_val = 0
   Lane 2: receives from Lane 3 (2⊕1=3) → swapped_val = 3
@@ -245,7 +249,7 @@ Cycle 2: shuffle_xor(current_val, 1) executes on all lanes
   Lane 30: receives from Lane 31 (30⊕1=31) → swapped_val = 31
   Lane 31: receives from Lane 30 (31⊕1=30) → swapped_val = 30
 
-Cycle 3: Store results
+Step 3: Store results
   Lane 0: output[0] = 1
   Lane 1: output[1] = 0
   Lane 2: output[2] = 3
@@ -268,9 +272,9 @@ i - 1 & \\text{if } i \\bmod 2 = 1
 
 **Performance characteristics:**
 
-- **Latency**: 1 cycle (hardware register exchange)
+- **Instruction count**: One shuffle instruction for the whole warp
 - **Bandwidth**: 0 bytes (no memory traffic)
-- **Parallelism**: All WARP_SIZE lanes exchange simultaneously
+- **Parallelism**: All `WARP_SIZE` lanes exchange in the same instruction
 - **Scalability**: \\(O(1)\\) complexity regardless of data size
 
 </div>
@@ -433,7 +437,8 @@ WARP_SIZE:  32
 SIZE:  32
 output: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
 expected: [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0]
-✅ Butterfly parallel max test passed!
+Butterfly parallel max test: passed
+Puzzle 26 complete ✅
 ```
 
 ### Solution
@@ -454,10 +459,10 @@ reduction trees with \\(O(\\log n)\\) complexity.
 
 ```mojo
 if global_i < size:
-    max_val = input[global_i]  # Start with local value
+    var max_val = input[global_i]  # Start with local value
 
     # Butterfly reduction tree: dynamic for any WARP_SIZE
-    offset = WARP_SIZE // 2
+    var offset = WARP_SIZE // 2
     while offset > 0:
         max_val = max(max_val, shuffle_xor(max_val, UInt32(offset)))
         offset //= 2
@@ -509,15 +514,15 @@ optimal \\(O(\\log n)\\) complexity.
    reduction
 2. **Perfect load balancing**: Every lane participates equally at each step
 3. **No memory bottlenecks**: Pure register-to-register communication
-4. **Hardware optimized**: Maps directly to GPU butterfly networks
+4. **Hardware optimized**: Each step is a single cross-lane shuffle instruction
 
 **Performance characteristics:**
 
 - **Steps**: \\(\\log_2(\\text{WARP\_SIZE})\\) (e.g., 5 for 32-thread, 6 for
   64-thread warp)
-- **Latency per step**: 1 cycle (register exchange + comparison)
-- **Total latency**: \\(\\log_2(\\text{WARP\_SIZE})\\) cycles vs
-  \\((\\text{WARP\_SIZE}-1)\\) cycles for sequential
+- **Work per step**: One shuffle plus one comparison
+- **Dependent steps**: \\(\\log_2(\\text{WARP\_SIZE})\\) vs
+  \\((\\text{WARP\_SIZE}-1)\\) for a sequential scan
 - **Parallelism**: All lanes active throughout the algorithm
 
 </div>
@@ -645,10 +650,11 @@ Expected output when solved:
 
 ```txt
 WARP_SIZE:  32
-SIZE_2:  64
-output: [9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0]
-expected: [9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0, 63.0, 32.0]
-✅ Butterfly conditional max test passed!
+SIZE:  64
+output: [9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0]
+expected: [9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0, 9.0, 0.0]
+Butterfly conditional max test: passed
+Puzzle 26 complete ✅
 ```
 
 ### Solution
@@ -669,16 +675,16 @@ conditional output.
 
 ```mojo
 if global_i < size:
-    current_val = input[global_i]
-    min_val = current_val  # Track minimum separately
+    var current_val = input[global_i]
+    var min_val = current_val  # Track minimum separately
 
-    # Butterfly reduction for both max and min log_2(WARP_SIZE}) steps)
-    offset = WARP_SIZE // 2
+    # Butterfly reduction for both max and min: log2(WARP_SIZE) steps
+    var offset = WARP_SIZE // 2
     while offset > 0:
-        neighbor_val = shuffle_xor(current_val, UInt32(offset))
+        var neighbor_val = shuffle_xor(current_val, UInt32(offset))
         current_val = max(current_val, neighbor_val)    # Max reduction
 
-        min_neighbor_val = shuffle_xor(min_val, UInt32(offset))
+        var min_neighbor_val = shuffle_xor(min_val, UInt32(offset))
         min_val = min(min_val, min_neighbor_val)        # Min reduction
 
         offset //= 2
@@ -717,12 +723,12 @@ Final result: All lanes have current_val=7 (global max) and min_val=1 (global mi
 **Dynamic algorithm** (works for any WARP_SIZE):
 
 ```mojo
-offset = WARP_SIZE // 2
+var offset = WARP_SIZE // 2
 while offset > 0:
-    neighbor_val = shuffle_xor(current_val, UInt32(offset))
+    var neighbor_val = shuffle_xor(current_val, UInt32(offset))
     current_val = max(current_val, neighbor_val)
 
-    min_neighbor_val = shuffle_xor(min_val, UInt32(offset))
+    var min_neighbor_val = shuffle_xor(min_val, UInt32(offset))
     min_val = min(min_val, min_neighbor_val)
 
     offset //= 2
@@ -789,9 +795,9 @@ problems, you've learned:
 **Dynamic Algorithm Design:**
 
 ```mojo
-offset = WARP_SIZE // 2
+var offset = WARP_SIZE // 2
 while offset > 0:
-    neighbor_val = shuffle_xor(current_val, UInt32(offset))
+    var neighbor_val = shuffle_xor(current_val, UInt32(offset))
     current_val = operation(current_val, neighbor_val)
     offset //= 2
 ```
@@ -799,7 +805,7 @@ while offset > 0:
 **Performance Advantages:**
 
 - **Hardware optimization**: Direct register-to-register communication
-- **No synchronization**: SIMT execution guarantees correctness
+- **No barriers to place**: The shuffle instruction carries the synchronization
 - **Scalable complexity**: \\(O(\\log n)\\) for any WARP_SIZE (32, 64, etc.)
 - **Memory efficiency**: Zero shared memory requirements
 

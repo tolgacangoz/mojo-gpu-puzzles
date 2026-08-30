@@ -172,7 +172,7 @@ from std.gpu import lane_id
 from std.gpu.primitives.warp import WARP_SIZE
 
 # Within a kernel function:
-my_lane = lane_id()  # Returns 0-31 (NVIDIA/RDNA) or 0-63 (CDNA)
+var my_lane = lane_id()  # Returns 0-31 (NVIDIA/RDNA) or 0-63 (CDNA)
 ```
 
 **Key insight:** `lane_id()` is **free** - it's just reading a hardware
@@ -188,7 +188,7 @@ The most powerful aspect of SIMT: **implicit synchronization**.
 # 1. Traditional shared memory approach:
 shared[thread_idx.x] = partial_result
 barrier()  # Explicit synchronization required
-var total = shared[0] + shared[1] + ... + shared[WARP_SIZE] # Sum reduction
+var total = shared[0] + shared[1] + ... + shared[WARP_SIZE - 1] # Sum reduction
 
 # 2. Warp approach:
 from std.gpu.primitives.warp import sum
@@ -205,6 +205,7 @@ same time. When `sum()` starts, all lanes have already computed their
 ### What happens with conditional code?
 
 ```mojo
+var result: Float32
 if lane_id() % 2 == 0:
     # Even lanes execute this path
     result = compute_even()
@@ -267,6 +268,7 @@ if lane_id() == 0:
 
 ```mojo
 # Regular patterns can be optimized by compiler
+var result: Float32
 if (global_i / 4) % 2 == 0:
     result = method_a()
 else:
@@ -279,6 +281,7 @@ else:
 
 ```mojo
 # Different lanes may take different paths based on data
+var result: Float32
 if input[global_i] > threshold:  # Unpredictable branching
     result = expensive_computation()
 else:
@@ -291,6 +294,7 @@ else:
 
 ```mojo
 # Multiple levels of unpredictable branching
+var result: Float32
 if input[global_i] > threshold1:
     if input[global_i] > threshold2:
         result = very_expensive()
@@ -304,7 +308,7 @@ else:
 
 ## Cross-architecture compatibility
 
-### NVIDIA vs AMD warp sizes
+### Warp sizes across architectures
 
 ```mojo
 from std.gpu.primitives.warp import WARP_SIZE
@@ -312,6 +316,7 @@ from std.gpu.primitives.warp import WARP_SIZE
 # NVIDIA GPUs:     WARP_SIZE = 32
 # AMD RDNA GPUs:   WARP_SIZE = 32 (wavefront32 mode)
 # AMD CDNA GPUs:   WARP_SIZE = 64 (traditional wavefront64)
+# Apple GPUs:      WARP_SIZE = 32 (SIMD-group width)
 ```
 
 **Why this matters:**
@@ -331,7 +336,7 @@ comptime THREADS_PER_BLOCK = (WARP_SIZE, 1)  # Adapts automatically
 comptime ELEMENTS_PER_WARP = WARP_SIZE        # Scales with hardware
 ```
 
-*Result: Code works optimally on NVIDIA/AMD (32) and AMD (64)*
+*Result: Code works optimally on NVIDIA/RDNA/Apple (32) and CDNA (64)*
 
 **❌ BROKEN: Never hardcode warp size**
 
@@ -344,10 +349,10 @@ comptime REDUCTION_SIZE = 32           # Wrong on AMD!
 
 ### Real hardware impact
 
-| GPU Architecture    | WARP_SIZE | Memory per Warp  | Reduction Steps           | Lane Pattern |
-|---------------------|-----------|------------------|---------------------------|--------------|
-| **NVIDIA/AMD RDNA** | 32        | 128 bytes (4×32) | 5 steps: 32→16→8→4→2→1    | Lanes 0-31   |
-| **AMD CDNA**        | 64        | 256 bytes (4×64) | 6 steps: 64→32→16→8→4→2→1 | Lanes 0-63   |
+| GPU Architecture          | WARP_SIZE | Memory per Warp  | Reduction Steps           | Lane Pattern |
+|---------------------------|-----------|------------------|---------------------------|--------------|
+| **NVIDIA/AMD RDNA/Apple** | 32        | 128 bytes (4×32) | 5 steps: 32→16→8→4→2→1    | Lanes 0-31   |
+| **AMD CDNA**              | 64        | 256 bytes (4×64) | 6 steps: 64→32→16→8→4→2→1 | Lanes 0-63   |
 
 **Performance implications of 64 vs 32:**
 

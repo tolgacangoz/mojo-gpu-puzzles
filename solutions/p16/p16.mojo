@@ -1,11 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -57,12 +64,12 @@ def single_block_matmul[
     var local_row = thread_idx.y
     var local_col = thread_idx.x
 
-    var a_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB, TPB]())
-    var b_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB, TPB]())
+    var a_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB, TPB]()
+    )
+    var b_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB, TPB]()
+    )
 
     if row < size and col < size:
         a_shared[local_row, local_col] = a[row, col]
@@ -102,12 +109,12 @@ def matmul_tiled[
     var tiled_row = block_idx.y * TPB + local_row
     var tiled_col = block_idx.x * TPB + local_col
 
-    var a_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB, TPB]())
-    var b_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB, TPB]())
+    var a_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB, TPB]()
+    )
+    var b_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB, TPB]()
+    )
 
     var acc: output.ElementType = 0
 
@@ -142,7 +149,7 @@ def matmul_tiled[
 # ANCHOR_END: matmul_tiled_solution
 
 # ANCHOR: matmul_idiomatic_tiled_solution
-from std.gpu.memory import async_copy_wait_all
+from max.gpu.memory import async_copy_wait_all
 from layout.layout_tensor import copy_dram_to_sram_async
 from layout import Layout as IntTupleLayout
 
@@ -164,12 +171,12 @@ def matmul_idiomatic_tiled[
 
     # Get the tile of the output matrix that this thread block is responsible for
     var out_tile = output.tile[TPB, TPB](block_idx.y, block_idx.x)
-    var a_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB, TPB]())
-    var b_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB, TPB]())
+    var a_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB, TPB]()
+    )
+    var b_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB, TPB]()
+    )
 
     var acc: output.ElementType = 0
 
@@ -276,11 +283,11 @@ def main() raises:
             )
         elif argv()[1] == "--tiled":
             # Need to update the layout of the tensors to the tiled layout
-            out_tensor_tiled = TileTensor(out, layout_tiled)
-            a_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
+            var out_tensor_tiled = TileTensor(out, layout_tiled)
+            var a_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
                 inp1, layout_tiled
             )
-            b_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
+            var b_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
                 inp2, layout_tiled
             )
 
@@ -293,11 +300,11 @@ def main() raises:
                 block_dim=THREADS_PER_BLOCK_TILED,
             )
         elif argv()[1] == "--idiomatic-tiled":
-            out_tensor_tiled = TileTensor(out, layout_tiled)
-            a_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
+            var out_tensor_tiled = TileTensor(out, layout_tiled)
+            var a_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
                 inp1, layout_tiled
             )
-            b_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
+            var b_tensor_tiled = TileTensor[mut=False, dtype, LayoutTiledType](
                 inp2, layout_tiled
             )
 

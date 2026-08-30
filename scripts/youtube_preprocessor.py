@@ -1,7 +1,14 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 import json
 import re
@@ -15,7 +22,7 @@ def process_content(content):
         video_id = match.group(1)
         size_class = match.group(2) or ""
         return f"""<div class="video-container {size_class}">
-<iframe src="https://www.youtube.com/embed/{video_id}" allowfullscreen></iframe>
+<iframe src="https://www.youtube-nocookie.com/embed/{video_id}" allowfullscreen></iframe>
 </div>"""
 
     return re.sub(pattern, replace, content)

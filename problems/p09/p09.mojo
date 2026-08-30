@@ -1,12 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.memory import UnsafePointer
-from std.gpu import thread_idx, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -25,11 +31,11 @@ comptime ITER = 3
 
 # ANCHOR: first_crash
 def add_10(
-    output: UnsafePointer[Scalar[dtype], MutAnyOrigin],
-    a: UnsafePointer[Scalar[dtype], MutAnyOrigin],
+    output: Pointer[Scalar[dtype], MutAnyOrigin],
+    a: Pointer[Scalar[dtype], MutAnyOrigin],
 ):
     var i = thread_idx.x
-    output[i] = a[i] + 10.0
+    output[unsafe_offset=i] = a[unsafe_offset=i] + 10.0
 
 
 # ANCHOR_END: first_crash
@@ -66,9 +72,9 @@ def collaborative_filter(
     var thread_id = thread_idx.x
 
     # Shared memory workspace for collaborative processing
-    var shared_workspace = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[SIZE - 1]())
+    var shared_workspace = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[SIZE - 1]()
+    )
 
     # Phase 1: Initialize shared workspace (all threads participate)
     if thread_id < SIZE - 1:
@@ -110,8 +116,7 @@ def main() raises:
         print()
 
         with DeviceContext() as ctx:
-            var input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
-            input_buf.enqueue_fill(0)
+            var input_buf = ctx.enqueue_create_buffer[dtype](0)
             var result_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             result_buf.enqueue_fill(0)
 
@@ -134,9 +139,9 @@ def main() raises:
 
         with DeviceContext() as ctx:
             # Create buffers
-            input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
+            var input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             input_buf.enqueue_fill(0)
-            output_buf = ctx.enqueue_create_buffer[dtype](SIZE)
+            var output_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             output_buf.enqueue_fill(0)
 
             # Initialize input [0, 1, 2, 3]
@@ -145,10 +150,10 @@ def main() raises:
                     input_host[i] = Scalar[dtype](i)
 
             # Create TileTensors for structured access
-            input_tensor = TileTensor[mut=False, dtype, VectorLayout](
+            var input_tensor = TileTensor[mut=False, dtype, VectorLayout](
                 input_buf, vector_layout
             )
-            output_tensor = TileTensor(output_buf, vector_layout)
+            var output_tensor = TileTensor(output_buf, vector_layout)
 
             print("Input array: [0, 1, 2, 3]")
             print("Computing sliding window sums (window size = 3)...")
@@ -177,7 +182,7 @@ def main() raises:
                 print("Expected: [1.0, 3.0, 6.0, 5.0]")
 
                 # Check if results match expected pattern
-                matches = True
+                var matches = True
                 if abs(output_host[0] - expected_0) > 0.001:
                     matches = False
                 if abs(output_host[1] - expected_1) > 0.001:
@@ -207,9 +212,9 @@ def main() raises:
 
         with DeviceContext() as ctx:
             # Create input and output buffers
-            input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
+            var input_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             input_buf.enqueue_fill(0)
-            output_buf = ctx.enqueue_create_buffer[dtype](SIZE)
+            var output_buf = ctx.enqueue_create_buffer[dtype](SIZE)
             output_buf.enqueue_fill(0)
 
             # Initialize input data [1, 2, 3, 4]
@@ -218,10 +223,10 @@ def main() raises:
                     input_host[i] = Scalar[dtype](i + 1)
 
             # Create TileTensors
-            input_tensor = TileTensor[mut=False, dtype, VectorLayout](
+            var input_tensor = TileTensor[mut=False, dtype, VectorLayout](
                 input_buf, vector_layout
             )
-            output_tensor = TileTensor(output_buf, vector_layout)
+            var output_tensor = TileTensor(output_buf, vector_layout)
 
             print("Input array: [1, 2, 3, 4]")
             print("Applying collaborative filter using shared memory...")

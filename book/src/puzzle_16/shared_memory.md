@@ -144,20 +144,20 @@ Matrix B:                           b_shared: (similar layout)
 
    ```mojo
    # Create 2D shared memory tensors using TileTensor with address_space
-   a_shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[TPB, TPB]())
-   b_shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[TPB, TPB]())
+   var a_shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[TPB, TPB]())
+   var b_shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[TPB, TPB]())
    ```
 
 2. **Thread Indexing**:
 
    ```mojo
    # Global indices for matrix access
-   row = block_dim.y * block_idx.y + thread_idx.y
-   col = block_dim.x * block_idx.x + thread_idx.x
+   var row = block_dim.y * block_idx.y + thread_idx.y
+   var col = block_dim.x * block_idx.x + thread_idx.x
 
    # Local indices for shared memory
-   local_row = thread_idx.y
-   local_col = thread_idx.x
+   var local_row = thread_idx.y
+   var local_col = thread_idx.x
    ```
 
 3. **Data Loading**:
@@ -167,7 +167,13 @@ Matrix B:                           b_shared: (similar layout)
    if row < size and col < size:
        a_shared[local_row, local_col] = a[row, col]
        b_shared[local_row, local_col] = b[row, col]
+
+   # Every thread reaches this, including the ones the guard skipped
+   barrier()
    ```
+
+   The `barrier()` sits outside the guard on purpose: a barrier that only some
+   threads in the block reach is undefined behavior.
 
 4. **Computation with Shared Memory**:
 
@@ -175,11 +181,10 @@ Matrix B:                           b_shared: (similar layout)
    # Guard ensures we only compute for valid matrix elements
    if row < size and col < size:
        # Initialize accumulator with output tensor's type
-       var acc: output.element_type = 0
+       var acc: output.ElementType = 0
 
        # Compile-time unrolled loop for matrix multiplication
-       @parameter
-       for k in range(size):
+       comptime for k in range(size):
            acc += a_shared[local_row, k] * b_shared[k, local_col]
 
        # Write result only for threads within matrix bounds
@@ -192,12 +197,12 @@ Matrix B:                           b_shared: (similar layout)
      - Only valid threads perform work
      - Essential because TPB (3×3) > SIZE (2×2)
 
-   - **Accumulator Type**: `var acc: output.element_type`
+   - **Accumulator Type**: `var acc: output.ElementType`
      - Uses output tensor's element type for type safety
      - Ensures consistent numeric precision
      - Initialized to zero before accumulation
 
-   - **Loop Optimization**: `@parameter for k in range(size)`
+   - **Loop Optimization**: `comptime for k in range(size)`
      - Unrolls the loop at compile time
      - Enables better instruction scheduling
      - Efficient for small, known matrix sizes
@@ -224,13 +229,13 @@ Matrix B:                           b_shared: (similar layout)
 
 1. **TileTensor benefits**:
    - Direct 2D indexing simplifies code
-   - Type safety through `element_type`
+   - Type safety through `ElementType`
    - Efficient memory layout handling
 
 2. **Shared memory allocation**:
    - TileTensor with address_space for structured allocation
    - Row-major layout matching input tensors
-   - Proper alignment for efficient access
+   - Aligned to the element type's natural alignment by default
 
 3. **Synchronization**:
    - `barrier()` ensures shared memory consistency
@@ -251,11 +256,10 @@ Matrix B:                           b_shared: (similar layout)
 
 3. **Computational benefits**:
    - Reduced global memory traffic
-   - Better cache utilization
-   - Improved instruction throughput
+   - Dot-product operands come from on-chip shared memory rather than global
+     memory
 
-This implementation significantly improves performance over the naive version
-by:
+This implementation improves on the naive version by:
 
 - Reducing global memory accesses
 - Enabling data reuse through shared memory

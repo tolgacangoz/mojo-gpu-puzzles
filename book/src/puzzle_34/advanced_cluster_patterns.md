@@ -27,15 +27,15 @@ specialized roles in a coordinated computation pipeline, extending
 **Your task**: Implement a multi-stage algorithm where:
 
 1. **[Warp-level](../puzzle_24/warp_sum.md)**: Use
-   [`elect_one_sync()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/elect_one_sync)
+   [`elect_one_sync()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/elect_one_sync)
    for efficient intra-warp coordination (from
    [SIMT execution](../puzzle_24/warp_simt.md))
 2. **[Block-level](../puzzle_27/block_sum.md)**: Aggregate warp results using
    [shared memory coordination](../puzzle_08/puzzle_08.md)
 3. **Cluster-level**: Coordinate between blocks using
-   [`cluster_arrive()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_arrive)
+   [`cluster_arrive()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_arrive)
    /
-   [`cluster_wait()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_wait)
+   [`cluster_wait()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_wait)
    [staged synchronization from Puzzle 29](../puzzle_29/barrier.md)
 
 ### Algorithm specification
@@ -47,20 +47,21 @@ specialized roles in a coordinated computation pipeline, extending
 2. **Stage 2 ([Block-level](../puzzle_27/puzzle_27.md))**: Aggregate all warp
    sums within each block
 3. **Stage 3 (Cluster-level)**: Coordinate between blocks with
-   [`cluster_arrive()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_arrive)
+   [`cluster_arrive()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_arrive)
    /
-   [`cluster_wait()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_wait)
+   [`cluster_wait()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_wait)
 
-**Input**: 1024 float values with pattern `(i % 50) * 0.02` for testing
-**Output**: 4 block results showing hierarchical processing effects
+- **Input**: 1024 float values with pattern `(i % 50) * 0.02` for testing
+- **Output**: 4 block results showing hierarchical processing effects
 
 ## Configuration
 
 - **Problem Size**: `SIZE = 1024` elements
 - **Block Configuration**: `TPB = 256` threads per block `(256, 1)`
 - **Grid Configuration**: `CLUSTER_SIZE = 4` blocks `(4, 1)`
-- **Warp Size**: `WARP_SIZE = 32` threads per warp (NVIDIA standard)
-- **Warps per Block**: `TPB / WARP_SIZE = 8` warps
+- **Warp Size**: 32 threads per warp (NVIDIA standard); the kernel hardcodes
+  `32` rather than reading a constant
+- **Warps per Block**: `TPB / 32 = 8` warps
 - **Data Type**: `DType.float32`
 - **Memory Layout**: Input `row_major[SIZE]()`, Output
   `row_major[CLUSTER_SIZE]()`
@@ -88,7 +89,7 @@ specialized roles in a coordinated computation pipeline, extending
 ### **Warp-level optimization patterns**
 
 - Use
-  [`elect_one_sync()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/elect_one_sync)
+  [`elect_one_sync()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/elect_one_sync)
   to select one thread per warp for computation (from
   [warp programming basics](../puzzle_24/warp_sum.md))
 - The elected thread should process 32 consecutive elements (leveraging
@@ -113,16 +114,16 @@ specialized roles in a coordinated computation pipeline, extending
 1. **Process**: Each block processes its data with hierarchical warp
    optimization
 2. **Signal**:
-   [`cluster_arrive()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_arrive)
+   [`cluster_arrive()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_arrive)
    indicates completion of local processing
 3. **Store**: Thread 0 writes the block result to output
 4. **Wait**:
-   [`cluster_wait()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_wait)
+   [`cluster_wait()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_wait)
    ensures all blocks complete before termination
 
 ### **Data scaling and bounds checking**
 
-- Scale input by `Float32(block_id + 1)` to create distinct block patterns
+- Scale input by `Scalar[dtype](block_id + 1)` to create distinct block patterns
 - Always check `global_i < size` before reading input (from
   [guards in Puzzle 3](../puzzle_03/puzzle_03.md))
 - Use `barrier()` between processing phases within blocks (from
@@ -136,16 +137,16 @@ specialized roles in a coordinated computation pipeline, extending
 ## Advanced cluster APIs
 
 **From
-[`gpu.primitives.cluster`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/)
+[`max.gpu.primitives.cluster`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/)
 module:**
 
-- **[`elect_one_sync()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/elect_one_sync)**:
+- **[`elect_one_sync()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/elect_one_sync)**:
   Warp-level thread election for efficient computation
-- **[`cluster_arrive()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_arrive)**:
+- **[`cluster_arrive()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_arrive)**:
   Signal completion for staged cluster coordination
-- **[`cluster_wait()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_wait)**:
+- **[`cluster_wait()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_wait)**:
   Wait for all blocks to reach synchronization point
-- **[`block_rank_in_cluster()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/block_rank_in_cluster)**:
+- **[`block_rank_in_cluster()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/block_rank_in_cluster)**:
   Get unique block identifier within cluster
 
 ## Hierarchical coordination pattern
@@ -206,7 +207,11 @@ Advanced cluster algorithm results:
   Block 1 : 247.04001
   Block 2 : 372.72
   Block 3 : 499.83997
-✅ Advanced cluster patterns tests passed!
+✅ Advanced Block 0 result: 122.799995
+✅ Advanced Block 1 result: 247.04001
+✅ Advanced Block 2 result: 372.72
+✅ Advanced Block 3 result: 499.83997
+Puzzle 34 complete ✅
 ```
 
 **Success Criteria:**
@@ -237,7 +242,7 @@ coordination for maximum GPU utilization:**
 **Data preparation and scaling:**
 
 ```mojo
-var data_scale = Float32(block_id + 1)  # Block-specific scaling factor
+var data_scale = Scalar[dtype](block_id + 1)  # Block-specific scaling factor
 if global_i < size:
     shared_data[local_i] = input[global_i] * data_scale
 else:
@@ -258,6 +263,9 @@ if elect_one_sync():  # Hardware elects exactly 1 thread per warp
 ```
 
 **Warp boundary calculation explained:**
+
+`(local_i // 32) * 32` rounds any thread index down to the first index of its
+warp:
 
 - **Thread 37** (in warp 1): `warp_start = (37 // 32) * 32 = 1 * 32 = 32`
 - **Thread 67** (in warp 2): `warp_start = (67 // 32) * 32 = 2 * 32 = 64`
@@ -310,19 +318,19 @@ if local_i == 0:
 ```mojo
 cluster_arrive()  # Non-blocking: signal this block's completion
 # ... Thread 0 computes and stores block result ...
-cluster_wait()    # Blocking: wait for all blocks to complete
+cluster_wait()    # Blocking: wait for all blocks to arrive
 ```
 
 **Why staged synchronization?**
 
-- **[`cluster_arrive()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_arrive)**
+- **[`cluster_arrive()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_arrive)**
   called **before** final computation allows overlapping work
 - Block can compute its result while other blocks are still processing
-- **[`cluster_wait()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_wait)**
-  ensures deterministic completion order
-- More efficient than
-  [`cluster_sync()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_sync)
-  for independent block computations
+- **[`cluster_wait()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_wait)**
+  then blocks until every block in the cluster has arrived
+- [`cluster_sync()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_sync)
+  is exactly these two calls back to back, so splitting them is what buys the
+  overlap window for independent block computations
 
 ## **Advanced pattern characteristics**
 
@@ -346,18 +354,19 @@ cluster_wait()    # Blocking: wait for all blocks to complete
 
 1. **`barrier()`**: Intra-block thread synchronization (after data loading and
    warp processing)
-2. **[`cluster_arrive()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_arrive)**:
+2. **[`cluster_arrive()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_arrive)**:
    Inter-block signaling (non-blocking, enables work overlap)
-3. **[`cluster_wait()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/cluster_wait)**:
-   Inter-block synchronization (blocking, ensures completion order)
+3. **[`cluster_wait()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/cluster_wait)**:
+   Inter-block synchronization (blocking, no block proceeds until all arrive)
 
 **Why this is "advanced":**
 
 - **Multi-level optimization**: Combines warp, block, and cluster programming
   techniques
 - **Hardware efficiency**: Leverages
-  [`elect_one_sync()`](https://docs.modular.com/mojo/std/gpu/primitives/cluster/elect_one_sync)
-  for optimal warp utilization
+  [`elect_one_sync()`](https://max.modular.com/api/mojo/max/gpu/primitives/cluster/elect_one_sync)
+  to pick one leader per warp instead of repeating the accumulation in all 32
+  lanes
 - **Staged coordination**: Uses advanced cluster APIs for flexible
   synchronization
 - **Production-ready**: Demonstrates patterns used in real-world GPU libraries
@@ -366,7 +375,8 @@ cluster_wait()    # Blocking: wait for all blocks to complete
 
 - **Reduced memory pressure**: Fewer threads accessing shared memory
   simultaneously
-- **Better warp utilization**: Elected threads perform focused computation
+- **Less redundant work**: One lane per warp accumulates, rather than all 32
+  computing the same sum
 - **Scalable coordination**: Staged synchronization handles larger cluster sizes
 - **Algorithm flexibility**: Foundation for complex multi-stage processing
   pipelines
@@ -386,15 +396,15 @@ cluster_wait()    # Blocking: wait for all blocks to complete
 Congratulations! By completing this puzzle, you've learned
 **the complete GPU programming stack**:
 
-✅ **Thread-level programming**: Individual execution units</br> ✅
+✅ **Thread-level programming**: Individual execution units<br> ✅
 **[Warp-level programming](../puzzle_24/puzzle_24.md)**: 32-thread SIMT
-coordination</br> ✅ **[Block-level programming](../puzzle_27/puzzle_27.md)**:
-Multi-warp coordination and shared memory</br> ✅
-**🆕 Cluster-level programming**: Multi-block coordination with SM90+ APIs</br>
+coordination<br> ✅ **[Block-level programming](../puzzle_27/puzzle_27.md)**:
+Multi-warp coordination and shared memory<br> ✅
+**🆕 Cluster-level programming**: Multi-block coordination with SM90+ APIs<br>
 ✅ **Coordinate multiple thread blocks** with cluster synchronization
-primitives</br> ✅ **Scale algorithms beyond single-block limitations** using
-cluster APIs</br> ✅ **Implement hierarchical algorithms** combining warp +
-block + cluster coordination</br> ✅ **Utilize next-generation GPU hardware**
+primitives<br> ✅ **Scale algorithms beyond single-block limitations** using
+cluster APIs<br> ✅ **Implement hierarchical algorithms** combining warp +
+block + cluster coordination<br> ✅ **Utilize next-generation GPU hardware**
 with SM90+ cluster programming
 
 ## Real-world applications
@@ -426,8 +436,12 @@ The hierarchical coordination patterns from this puzzle are fundamental to:
 You've now learned the **cutting-edge GPU programming techniques** available on
 modern hardware!
 
-**Ready for more challenges?** Explore other advanced GPU programming topics,
-revisit
+**Next step**: Continue to
+**[Puzzle 35: Memory Alignment](../puzzle_35/puzzle_35.md)**, which drops back
+down to a single kernel and shows how much bandwidth the alignment you declare
+on a load or store is worth.
+
+You can also revisit
 [performance optimization techniques from Puzzles 30-32](../puzzle_30/puzzle_30.md),
 apply
 [profiling methodologies from NVIDIA tools](../puzzle_30/nvidia_profiling_basics.md),

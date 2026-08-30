@@ -1,18 +1,25 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 from std.math import sqrt
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
 from std.atomic import Atomic
 from layout import TileTensor
 from layout.tile_layout import row_major, TensorLayout
 from layout.tile_tensor import stack_allocation
-import compiler
+import extensibility
 
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 
 from extensibility import InputTensor, OutputTensor
 from std.utils import StaticTuple
@@ -32,7 +39,7 @@ def matmul_idiomatic_tiled[
     OutLayout: TensorLayout,
     ALayout: TensorLayout,
     BLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
     a: TileTensor[mut=True, dtype, ALayout, MutAnyOrigin],
@@ -51,12 +58,12 @@ def matmul_idiomatic_tiled[
     comptime shared_layout = row_major[
         MATMUL_BLOCK_DIM_XY, MATMUL_BLOCK_DIM_XY
     ]()
-    var a_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](shared_layout)
-    var b_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](shared_layout)
+    var a_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        shared_layout
+    )
+    var b_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        shared_layout
+    )
     var acc: output.ElementType = 0
 
     var a_lt = a.to_layout_tensor()
@@ -118,7 +125,7 @@ def layernorm_kernel[
     OutputLayout: TensorLayout,
     InputLayout: TensorLayout,
     LnParamsLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutputLayout, MutAnyOrigin],
     input: TileTensor[mut=True, dtype, InputLayout, MutAnyOrigin],
@@ -171,7 +178,7 @@ def transpose_kernel[
     cols: Int,
     OutLayout: TensorLayout,
     InLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
     inp: TileTensor[mut=True, dtype, InLayout, MutAnyOrigin],
@@ -182,9 +189,9 @@ def transpose_kernel[
     comptime shared_layout = row_major[
         TRANSPOSE_BLOCK_DIM_XY, TRANSPOSE_BLOCK_DIM_XY
     ]()
-    var shared_tile = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](shared_layout)
+    var shared_tile = stack_allocation[dtype=dtype, address_space=.SHARED](
+        shared_layout
+    )
 
     var local_row = thread_idx.y
     var local_col = thread_idx.x
@@ -221,7 +228,7 @@ def add_bias_kernel[
     OutputLayout: TensorLayout,
     InputLayout: TensorLayout,
     BiasLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutputLayout, MutAnyOrigin],
     input: TileTensor[mut=True, dtype, InputLayout, MutAnyOrigin],
@@ -258,7 +265,7 @@ def minimal_fused_kernel[
     LnParamsLayout: TensorLayout,
     WeightLayout: TensorLayout,
     BiasLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutputLayout, MutAnyOrigin],
     input: TileTensor[mut=True, dtype, InputLayout, MutAnyOrigin],
@@ -332,7 +339,7 @@ def minimal_fused_kernel_backward[
     InputLayout: TensorLayout,
     LnParamsLayout: TensorLayout,
     WeightLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     grad_input: TileTensor[mut=True, dtype, GradInputLayout, MutAnyOrigin],
     grad_ln_weight: TileTensor[
@@ -371,15 +378,15 @@ def minimal_fused_kernel_backward[
     if batch_idx == 0 and seq_idx == 0:
         # Initialize grad_ln_weight and grad_ln_bias
         comptime for h in range(hidden_dim):
-            (grad_ln_weight.ptr + h).unsafe_write(0)
-            (grad_ln_bias.ptr + h).unsafe_write(0)
+            grad_ln_weight.ptr.unsafe_offset(h).write(0)
+            grad_ln_bias.ptr.unsafe_offset(h).write(0)
 
         # Initialize grad_weight and grad_bias
         comptime for out_idx in range(output_dim):
-            (grad_bias.ptr + out_idx).unsafe_write(0)
+            grad_bias.ptr.unsafe_offset(out_idx).write(0)
 
             comptime for h in range(hidden_dim):
-                (grad_weight.ptr + out_idx * hidden_dim + h).unsafe_write(0)
+                grad_weight.ptr.unsafe_offset(out_idx * hidden_dim + h).write(0)
 
     # Note: We cannot use barrier() here as it only synchronizes within a block.
     # The atomic operations will handle synchronization across blocks.
@@ -399,8 +406,8 @@ def minimal_fused_kernel_backward[
 
     # Step 2: Atomically accumulate gradients w.r.t. linear bias
     comptime for out_idx in range(output_dim):
-        var grad_bias_ptr = grad_bias.ptr + out_idx
-        _ = Atomic[dtype].fetch_add(
+        var grad_bias_ptr = grad_bias.ptr.unsafe_offset(out_idx)
+        _ = Atomic[Scalar[dtype]].fetch_add(
             grad_bias_ptr,
             rebind[Scalar[dtype]](grad_output_lt[batch_idx, seq_idx, out_idx]),
         )
@@ -418,13 +425,15 @@ def minimal_fused_kernel_backward[
             var grad_w = (
                 grad_output_lt[batch_idx, seq_idx, out_idx] * ln_output_val
             )
-            var grad_weight_ptr = grad_weight.ptr + out_idx * hidden_dim + h
+            var grad_weight_ptr = grad_weight.ptr.unsafe_offset(
+                out_idx * hidden_dim + h
+            )
             _ = Atomic.fetch_add(grad_weight_ptr, rebind[Scalar[dtype]](grad_w))
 
     # Step 4: Atomically accumulate gradients w.r.t. LayerNorm parameters
     comptime for h in range(hidden_dim):
-        input_val = input_lt[batch_idx, seq_idx, h]
-        normalized = (input_val - mean_val) * inv_std
+        var input_val = input_lt[batch_idx, seq_idx, h]
+        var normalized = (input_val - mean_val) * inv_std
 
         # Compute gradient w.r.t. LayerNorm output for this h
         var grad_ln_out: Scalar[dtype] = 0
@@ -436,12 +445,12 @@ def minimal_fused_kernel_backward[
             )
 
         # Atomic accumulation of LayerNorm parameter gradients
-        var grad_ln_weight_ptr = grad_ln_weight.ptr + h
-        var grad_ln_bias_ptr = grad_ln_bias.ptr + h
-        _ = Atomic[dtype].fetch_add(
+        var grad_ln_weight_ptr = grad_ln_weight.ptr.unsafe_offset(h)
+        var grad_ln_bias_ptr = grad_ln_bias.ptr.unsafe_offset(h)
+        _ = Atomic[Scalar[dtype]].fetch_add(
             grad_ln_weight_ptr, rebind[Scalar[dtype]](grad_ln_out * normalized)
         )
-        _ = Atomic[dtype].fetch_add(
+        _ = Atomic[Scalar[dtype]].fetch_add(
             grad_ln_bias_ptr, rebind[Scalar[dtype]](grad_ln_out)
         )
 
@@ -451,8 +460,8 @@ def minimal_fused_kernel_backward[
     var sum_grad_normalized_times_normalized: Scalar[dtype] = 0
 
     comptime for h in range(hidden_dim):
-        h_input_val = input_lt[batch_idx, seq_idx, h]
-        h_normalized = (h_input_val - mean_val) * inv_std
+        var h_input_val = input_lt[batch_idx, seq_idx, h]
+        var h_normalized = (h_input_val - mean_val) * inv_std
 
         var h_grad_ln_out: Scalar[dtype] = 0
 
@@ -462,7 +471,7 @@ def minimal_fused_kernel_backward[
                 * linear_weight_lt[out_idx, h]
             )
 
-        h_grad_norm = h_grad_ln_out * rebind[Scalar[dtype]](ln_weight_lt[h])
+        var h_grad_norm = h_grad_ln_out * rebind[Scalar[dtype]](ln_weight_lt[h])
         sum_grad_normalized = sum_grad_normalized + rebind[Scalar[dtype]](
             h_grad_norm
         )
@@ -473,8 +482,8 @@ def minimal_fused_kernel_backward[
 
     # Compute actual input gradients (no race conditions here - each thread writes to different positions)
     comptime for h in range(hidden_dim):
-        h_input_val = input_lt[batch_idx, seq_idx, h]
-        h_normalized = (h_input_val - mean_val) * inv_std
+        var h_input_val = input_lt[batch_idx, seq_idx, h]
+        var h_normalized = (h_input_val - mean_val) * inv_std
 
         var h_grad_ln_out: Scalar[dtype] = 0
 
@@ -484,7 +493,7 @@ def minimal_fused_kernel_backward[
                 * linear_weight_lt[out_idx, h]
             )
 
-        h_grad_norm = h_grad_ln_out * rebind[Scalar[dtype]](ln_weight_lt[h])
+        var h_grad_norm = h_grad_ln_out * rebind[Scalar[dtype]](ln_weight_lt[h])
         grad_input_lt[batch_idx, seq_idx, h] = inv_std * (
             h_grad_norm
             - (sum_grad_normalized / Scalar[dtype](hidden_dim))
@@ -499,7 +508,7 @@ def minimal_fused_kernel_backward[
 # ANCHOR_END: minimal_fused_backward_kernel_solution
 
 
-@compiler.register("layernorm_linear")
+@extensibility.register("layernorm_linear")
 struct LayerNormLinearCustomOp:
     @staticmethod
     def execute[
@@ -509,7 +518,7 @@ struct LayerNormLinearCustomOp:
         seq_len: Int,
         hidden_dim: Int,
         output_dim: Int,
-        dtype: DType = DType.float32,
+        dtype: DType = .float32,
     ](
         output: OutputTensor[dtype=dtype, rank=3, static_spec=_],
         input: InputTensor[dtype=dtype, rank=3, static_spec=_],
@@ -635,10 +644,7 @@ struct LayerNormLinearCustomOp:
                     transposed_weight_layout
                 )
                 var transposed_weight_tensor = TileTensor[
-                    mut=True,
-                    dtype,
-                    TransposedWeightLayout,
-                    MutAnyOrigin,
+                    mut=True, dtype, TransposedWeightLayout, MutAnyOrigin
                 ](transposed_weight_buffer, transposed_weight_layout)
 
                 # Transpose the weight matrix
@@ -755,7 +761,7 @@ struct LayerNormLinearCustomOp:
 
 
 # ANCHOR: layernorm_linear_backward_custom_op
-@compiler.register("layernorm_linear_backward")
+@extensibility.register("layernorm_linear_backward")
 struct LayerNormLinearBackwardCustomOp:
     @staticmethod
     def execute[
@@ -764,7 +770,7 @@ struct LayerNormLinearBackwardCustomOp:
         seq_len: Int,
         hidden_dim: Int,
         output_dim: Int,
-        dtype: DType = DType.float32,
+        dtype: DType = .float32,
     ](
         grad_input: OutputTensor[dtype=dtype, rank=3, static_spec=_],
         grad_ln_weight: OutputTensor[dtype=dtype, rank=1, static_spec=_],
@@ -912,8 +918,8 @@ struct LayerNormLinearBackwardCustomOp:
                     # Gradient w.r.t. linear weight
                     for out_idx in range(output_dim):
                         for h in range(hidden_dim):
-                            input_val = input_tensor[batch, seq, h]
-                            normalized = (input_val - mean_val) * inv_std
+                            var input_val = input_tensor[batch, seq, h]
+                            var normalized = (input_val - mean_val) * inv_std
                             var ln_output_val = (
                                 normalized * ln_weight_tensor[h]
                                 + ln_bias_tensor[h]
@@ -926,8 +932,8 @@ struct LayerNormLinearBackwardCustomOp:
 
                     # Gradient w.r.t. LayerNorm parameters
                     for h in range(hidden_dim):
-                        input_val = input_tensor[batch, seq, h]
-                        normalized = (input_val - mean_val) * inv_std
+                        var input_val = input_tensor[batch, seq, h]
+                        var normalized = (input_val - mean_val) * inv_std
 
                         var grad_ln_out: Scalar[dtype] = 0
                         for out_idx in range(output_dim):
@@ -948,8 +954,8 @@ struct LayerNormLinearBackwardCustomOp:
                     var sum_grad_normalized_times_normalized: Scalar[dtype] = 0
 
                     for h in range(hidden_dim):
-                        input_val = input_tensor[batch, seq, h]
-                        normalized = (input_val - mean_val) * inv_std
+                        var input_val = input_tensor[batch, seq, h]
+                        var normalized = (input_val - mean_val) * inv_std
 
                         var grad_ln_out: Scalar[dtype] = 0
                         for out_idx in range(output_dim):
@@ -958,7 +964,7 @@ struct LayerNormLinearBackwardCustomOp:
                                 * linear_weight_tensor[out_idx, h]
                             )
 
-                        grad_norm = grad_ln_out * ln_weight_tensor[h]
+                        var grad_norm = grad_ln_out * ln_weight_tensor[h]
                         sum_grad_normalized = sum_grad_normalized + grad_norm
                         sum_grad_normalized_times_normalized = (
                             sum_grad_normalized_times_normalized
@@ -966,8 +972,8 @@ struct LayerNormLinearBackwardCustomOp:
                         )
 
                     for h in range(hidden_dim):
-                        input_val = input_tensor[batch, seq, h]
-                        normalized = (input_val - mean_val) * inv_std
+                        var input_val = input_tensor[batch, seq, h]
+                        var normalized = (input_val - mean_val) * inv_std
 
                         var grad_ln_out: Scalar[dtype] = 0
                         for out_idx in range(output_dim):
@@ -976,7 +982,7 @@ struct LayerNormLinearBackwardCustomOp:
                                 * linear_weight_tensor[out_idx, h]
                             )
 
-                        grad_norm = grad_ln_out * ln_weight_tensor[h]
+                        var grad_norm = grad_ln_out * ln_weight_tensor[h]
                         grad_input_tensor[batch, seq, h] = inv_std * (
                             grad_norm
                             - (sum_grad_normalized / Scalar[dtype](hidden_dim))

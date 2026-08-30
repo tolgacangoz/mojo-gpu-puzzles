@@ -1,21 +1,45 @@
 #!/bin/bash
 ##===----------------------------------------------------------------------===##
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 ##===----------------------------------------------------------------------===##
 # Build English + all translated mdbook languages.
 # Auto-discovers languages from book/i18n/*/book.toml
 #
+# Fonts + lottie-player are fetched from CDN and fall back to a locally
+# vendored copy at runtime if that fails (see book/theme/head.hbs and
+# book/theme/index.hbs) — this script never needs network access itself.
+#
 # Usage:
-#   bash scripts/build_book.sh          # CI: translations → html/{lang}/
-#   bash scripts/build_book.sh --serve  # Dev: translations → html-{lang}/
+#   bash scripts/build_book.sh                     # CI: translations → html/{lang}/
+#   bash scripts/build_book.sh --serve              # Dev: translations → html-{lang}/
+#   bash scripts/build_book.sh --offline            # also pre-fetch the runtime
+#                                                     # fallback assets, so the book
+#                                                     # is ready to browse with no
+#                                                     # network access right away
 
 set -euo pipefail
 
-BOOK_DIR="$(cd "$(dirname "$0")/../book" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BOOK_DIR="$(cd "$SCRIPT_DIR/../book" && pwd)"
 SERVE_MODE=false
-[[ "${1:-}" == "--serve" ]] && SERVE_MODE=true
+OFFLINE_MODE=false
+for arg in "$@"; do
+    case "$arg" in
+        --serve) SERVE_MODE=true ;;
+        --offline) OFFLINE_MODE=true ;;
+    esac
+done
+
+$OFFLINE_MODE && bash "$SCRIPT_DIR/fetch_offline_assets.sh"
 
 # Discover translation languages
 LANGS=()

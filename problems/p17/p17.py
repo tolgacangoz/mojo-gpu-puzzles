@@ -1,7 +1,14 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 from pathlib import Path
 
@@ -49,7 +56,7 @@ def conv_1d(
         input_value, kernel_value = graph.inputs
 
         # The output shape is the same as the input for our 1D convolution implementation
-        # Note: the name must match the name used in `@compiler.register("conv1d")` in op/conv1d.mojo
+        # Note: the name must match the name used in `@extensibility.register("conv1d")` in op/conv1d.mojo
         output = ops.custom(
             name="conv1d",
             device=DeviceRef.from_device(device),

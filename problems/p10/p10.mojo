@@ -1,11 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_dim, block_idx, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_dim, block_idx
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -25,14 +32,15 @@ comptime LayoutType = type_of(layout)
 def shared_memory_race(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
     var row = thread_idx.y
     var col = thread_idx.x
 
-    var shared_sum = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[1]())
+    var shared_sum = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[1]()
+    )
 
     if row < size and col < size:
         shared_sum[0] += a[row, col]
@@ -50,8 +58,10 @@ def shared_memory_race(
 def add_10_2d(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
+    var size = Int(size_dev)
+    _ = size
     var row = thread_idx.y
     var col = thread_idx.x
     output[row, col] = a[row, col] + 10.0
@@ -95,7 +105,7 @@ def main() raises:
             ctx.enqueue_function[add_10_2d](
                 out_tensor,
                 a_tensor,
-                SIZE,
+                Int32(SIZE),
                 grid_dim=BLOCKS_PER_GRID,
                 block_dim=THREADS_PER_BLOCK,
             )
@@ -124,7 +134,7 @@ def main() raises:
             ctx.enqueue_function[shared_memory_race](
                 out_tensor,
                 a_tensor,
-                SIZE,
+                Int32(SIZE),
                 grid_dim=BLOCKS_PER_GRID,
                 block_dim=THREADS_PER_BLOCK,
             )

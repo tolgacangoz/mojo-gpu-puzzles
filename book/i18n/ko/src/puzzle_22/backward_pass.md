@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 477e5a0d3eed091b3dde0812977773f7dc97730a -->
+<!-- i18n-source-commit: 9880cfdfb6462fafe381b031a42c11b75f2437d6 -->
 
 # ⛓️ 오토그래드 통합과 역방향 패스
 
@@ -78,7 +78,7 @@ x} \\] 여기서:
 커널로 결합합니다. 이 구현은 다음을 신중하게 다뤄야 하는 도전적인 과제입니다:
 
 - 기울기 누적을 위한
-  [원자적 연산](https://docs.modular.com/mojo/std/os/atomic/Atomic/)
+  [원자적 연산](https://mojolang.org/docs/std/os/atomic/Atomic/)
 - 기울기 계산에서의 수치 안정성
 - 효율적인 GPU 활용을 위한 메모리 접근 패턴
 - 연산 간 적절한 동기화
@@ -294,7 +294,7 @@ BACKWARD PASS Test Completed!
    - 적절한 메모리 정렬
 
 7. **구현 세부 사항**:
-   - 컴파일 타임 상수를 위한 `@parameter` 사용
+   - 컴파일 타임 상수를 위한 `comptime` 사용
    - 텐서 차원의 적절한 처리
    - 효율적인 타입 캐스팅과 변환
    - 공유 메모리의 신중한 관리

@@ -1,16 +1,23 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.sync import (
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.sync import (
     mbarrier_init,
     mbarrier_arrive,
     mbarrier_test_wait,
 )
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -36,7 +43,7 @@ comptime BLUR_RADIUS = 2
 def multi_stage_image_blur_pipeline(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     input: TileTensor[mut=False, dtype, LayoutType, MutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
     """Multi-stage image blur pipeline with barrier coordination.
 
@@ -46,13 +53,14 @@ def multi_stage_image_blur_pipeline(
     """
 
     # Shared memory buffers for pipeline stages
-    var input_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
-    var blur_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
+    var input_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
+    var blur_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
 
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
 
@@ -77,11 +85,11 @@ def multi_stage_image_blur_pipeline(
     if local_i >= STAGE1_THREADS:
         var blur_idx = local_i - STAGE1_THREADS
         var blur_sum: Scalar[dtype] = 0.0
-        blur_count = 0
+        var blur_count = 0
 
         # 5-point blur kernel
         for offset in range(-BLUR_RADIUS, BLUR_RADIUS + 1):
-            sample_idx = blur_idx + offset
+            var sample_idx = blur_idx + offset
             if sample_idx >= 0 and sample_idx < TPB:
                 blur_sum += input_shared[sample_idx]
                 blur_count += 1
@@ -97,7 +105,7 @@ def multi_stage_image_blur_pipeline(
             blur_sum = 0.0
             blur_count = 0
             for offset in range(-BLUR_RADIUS, BLUR_RADIUS + 1):
-                sample_idx = second_idx + offset
+                var sample_idx = second_idx + offset
                 if sample_idx >= 0 and sample_idx < TPB:
                     blur_sum += input_shared[sample_idx]
                     blur_count += 1
@@ -111,7 +119,7 @@ def multi_stage_image_blur_pipeline(
 
     # Stage 3: Final smoothing (all threads)
     if global_i < size:
-        final_value = blur_shared[local_i]
+        var final_value = blur_shared[local_i]
 
         # Neighbor smoothing with 0.6 scaling
         if local_i > 0:
@@ -136,7 +144,7 @@ comptime BUFFER_COUNT = 2
 def double_buffered_stencil_computation(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     input: TileTensor[mut=False, dtype, LayoutType, MutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
     """Double-buffered stencil computation with memory barrier coordination.
 
@@ -145,24 +153,25 @@ def double_buffered_stencil_computation(
     """
 
     # Double-buffering: Two shared memory buffers
-    var buffer_A = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
-    var buffer_B = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB]())
+    var buffer_A = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
+    var buffer_B = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB]()
+    )
 
     # Memory barriers for coordinating buffer swaps
     var init_barrier = stack_allocation[
-        dtype=DType.uint64, address_space=AddressSpace.SHARED
+        dtype=DType.uint64, address_space=.SHARED
     ](row_major[1]())
     var iter_barrier = stack_allocation[
-        dtype=DType.uint64, address_space=AddressSpace.SHARED
+        dtype=DType.uint64, address_space=.SHARED
     ](row_major[1]())
     var final_barrier = stack_allocation[
-        dtype=DType.uint64, address_space=AddressSpace.SHARED
+        dtype=DType.uint64, address_space=.SHARED
     ](row_major[1]())
 
+    var size = Int(size_dev)
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
 
@@ -198,7 +207,7 @@ def double_buffered_stencil_computation(
 
                 # 3-point stencil: [i-1, i, i+1]
                 for offset in range(-1, 2):
-                    sample_idx = local_i + offset
+                    var sample_idx = local_i + offset
                     if sample_idx >= 0 and sample_idx < TPB:
                         stencil_sum += buffer_A[sample_idx]
                         stencil_count += 1
@@ -218,7 +227,7 @@ def double_buffered_stencil_computation(
 
                 # 3-point stencil: [i-1, i, i+1]
                 for offset in range(-1, 2):
-                    sample_idx = local_i + offset
+                    var sample_idx = local_i + offset
                     if sample_idx >= 0 and sample_idx < TPB:
                         stencil_sum += buffer_B[sample_idx]
                         stencil_count += 1
@@ -263,7 +272,7 @@ def double_buffered_stencil_computation(
 
 
 def test_multi_stage_pipeline() raises:
-    """Test Puzzle 26A: Multi-Stage Pipeline Coordination."""
+    """Test Puzzle 29A: Multi-Stage Pipeline Coordination."""
     with DeviceContext() as ctx:
         var out = ctx.enqueue_create_buffer[dtype](SIZE)
         out.enqueue_fill(0)
@@ -284,7 +293,7 @@ def test_multi_stage_pipeline() raises:
         ctx.enqueue_function[kernel](
             out_tensor,
             inp_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=BLOCKS_PER_GRID,
             block_dim=THREADS_PER_BLOCK,
         )
@@ -324,9 +333,9 @@ def test_multi_stage_pipeline() raises:
 
 
 def test_double_buffered_stencil() raises:
-    """Test Puzzle 26B: Double-Buffered Stencil Computation."""
+    """Test Puzzle 29B: Double-Buffered Stencil Computation."""
     with DeviceContext() as ctx:
-        # Test Puzzle 26B: Double-Buffered Stencil Computation
+        # Test Puzzle 29B: Double-Buffered Stencil Computation
         var out = ctx.enqueue_create_buffer[dtype](SIZE)
         out.enqueue_fill(0)
         var inp = ctx.enqueue_create_buffer[dtype](SIZE)
@@ -338,7 +347,7 @@ def test_double_buffered_stencil() raises:
                 # Create a step pattern that will be smoothed by stencil
                 inp_host[i] = Scalar[dtype](1.0 if i % 20 < 10 else 0.0)
 
-        # Create TileTensors for Puzzle 26B
+        # Create TileTensors for Puzzle 29B
         var out_tensor = TileTensor[mut=True, dtype, LayoutType](out, layout)
         var inp_tensor = TileTensor[mut=False, dtype, LayoutType](inp, layout)
 
@@ -346,7 +355,7 @@ def test_double_buffered_stencil() raises:
         ctx.enqueue_function[kernel](
             out_tensor,
             inp_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=BLOCKS_PER_GRID,
             block_dim=THREADS_PER_BLOCK,
         )
@@ -402,12 +411,12 @@ def test_double_buffered_stencil() raises:
 
 def main() raises:
     """Run GPU synchronization tests based on command line arguments."""
-    print("Puzzle 26: GPU Synchronization Primitives")
+    print("Puzzle 29: GPU Synchronization Primitives")
     print("=" * 50)
 
     # Parse command line arguments
     if len(argv()) != 2:
-        print("Usage: p26.mojo [--multi-stage | --double-buffer]")
+        print("Usage: p29.mojo [--multi-stage | --double-buffer]")
         print("  --multi-stage: Test multi-stage pipeline coordination")
         print("  --double-buffer: Test double-buffered stencil computation")
         return
@@ -419,7 +428,7 @@ def main() raises:
         print("STAGE2_THREADS:", STAGE2_THREADS)
         print("BLUR_RADIUS:", BLUR_RADIUS)
         print("")
-        print("Testing Puzzle 26A: Multi-Stage Pipeline Coordination")
+        print("Testing Puzzle 29A: Multi-Stage Pipeline Coordination")
         print("=" * 60)
         test_multi_stage_pipeline()
     elif argv()[1] == "--double-buffer":
@@ -428,8 +437,8 @@ def main() raises:
         print("STENCIL_ITERATIONS:", STENCIL_ITERATIONS)
         print("BUFFER_COUNT:", BUFFER_COUNT)
         print("")
-        print("Testing Puzzle 26B: Double-Buffered Stencil Computation")
+        print("Testing Puzzle 29B: Double-Buffered Stencil Computation")
         print("=" * 60)
         test_double_buffered_stencil()
     else:
-        print("Usage: p26.mojo [--multi-stage | --double-buffer]")
+        print("Usage: p29.mojo [--multi-stage | --double-buffer]")

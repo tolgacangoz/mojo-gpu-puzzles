@@ -1,12 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.memory import UnsafePointer
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext, HostBuffer, DeviceBuffer
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext, HostBuffer, DeviceBuffer
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -26,7 +32,7 @@ comptime BLOCK_DIM_X = 1 << log2_ceil(SIZE)
 # ANCHOR: softmax_gpu_kernel_solution
 def softmax_gpu_kernel[
     input_size: Int,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     input: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
@@ -34,12 +40,12 @@ def softmax_gpu_kernel[
     comptime assert (
         dtype.is_floating_point()
     ), "dtype must be a floating-point type"
-    var shared_max = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[BLOCK_DIM_X]())
-    var shared_sum = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[BLOCK_DIM_X]())
+    var shared_max = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[BLOCK_DIM_X]()
+    )
+    var shared_sum = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[BLOCK_DIM_X]()
+    )
     var global_i = thread_idx.x
 
     # Initialize out-of-bounds (shared_max[local_i], global_i >= input_size) shared memory addresses to the minimum
@@ -94,7 +100,7 @@ def softmax_gpu_kernel[
 # ANCHOR: softmax_cpu_kernel_solution
 def softmax_cpu_kernel[
     input_size: Int,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     input: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
@@ -118,18 +124,18 @@ def softmax_cpu_kernel[
 
 # ANCHOR_END: softmax_cpu_kernel_solution
 
-import compiler
+import extensibility
 
 from extensibility import InputTensor, OutputTensor
 
 
-@compiler.register("softmax")
+@extensibility.register("softmax")
 struct SoftmaxCustomOp:
     @staticmethod
     def execute[
         target: StaticString,  # "cpu" or "gpu"
         input_size: Int,
-        dtype: DType = DType.float32,
+        dtype: DType = .float32,
     ](
         output: OutputTensor[dtype=dtype, rank=1, static_spec=_],
         input: InputTensor[dtype=dtype, rank=output.rank, static_spec=_],

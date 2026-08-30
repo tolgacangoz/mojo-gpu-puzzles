@@ -1,10 +1,17 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 from std.gpu import thread_idx, block_idx, block_dim, lane_id
-from std.gpu.host import DeviceContext
+from max.gpu.host import DeviceContext
 from std.gpu.primitives.warp import shuffle_xor, prefix_sum, WARP_SIZE
 from layout import TileTensor
 from layout.tile_layout import row_major
@@ -20,7 +27,7 @@ comptime layout = row_major[SIZE]()
 comptime LayoutType = type_of(layout)
 
 
-# ANCHOR: butterfly_pair_swap_solution
+# ANCHOR: butterfly_pair_swap
 def butterfly_pair_swap[
     size: Int
 ](
@@ -38,7 +45,7 @@ def butterfly_pair_swap[
     # FILL ME IN (4 lines)
 
 
-# ANCHOR_END: butterfly_pair_swap_solution
+# ANCHOR_END: butterfly_pair_swap
 
 
 # ANCHOR: butterfly_parallel_max
@@ -103,9 +110,9 @@ def warp_inclusive_prefix_sum[
 ):
     """
     Inclusive prefix sum using warp primitive: Each thread gets sum of all elements up to and including its position.
-    Compare this to Puzzle 12's complex shared memory + barrier approach.
+    Compare this to Puzzle 14's complex shared memory + barrier approach.
 
-    Puzzle 12 approach:
+    Puzzle 14 approach:
     - Shared memory allocation
     - Multiple barrier synchronizations
     - Log(n) iterations with manual tree reduction
@@ -286,6 +293,8 @@ def test_butterfly_conditional_max() raises:
         expected_buf.enqueue_fill(0)
 
         # Expected: even lanes get max, odd lanes get min
+        var max_val: Float32
+        var min_val: Float32
         with input_buf.map_to_host() as input_host:
             max_val = input_host[0]
             min_val = input_host[0]

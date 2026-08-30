@@ -1,8 +1,15 @@
 #!/bin/bash
 ##===----------------------------------------------------------------------===##
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 ##===----------------------------------------------------------------------===##
 #
 # Compile every problem skeleton (the unfilled puzzle starting points).
@@ -82,7 +89,7 @@ for sol_dir in solutions/p*/; do
     echo "${puzzle}:"
     if [ -d "${prob_dir}/op" ]; then
         # Custom-op module: compile the package (no main()).
-        compile_target "${prob_dir}/op" package "${prob_dir}/op" -o /tmp/skel.mojopkg
+        compile_target "${prob_dir}/op" package "${prob_dir}/op" -o /tmp/skel.mojoc
         continue
     fi
     # Standalone puzzle files: compile each .mojo that defines a main().

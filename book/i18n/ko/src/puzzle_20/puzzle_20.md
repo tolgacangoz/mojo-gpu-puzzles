@@ -22,7 +22,7 @@
 
 이 퍼즐에서는 [Puzzle 17: 1D 합성곱 Op](../puzzle_17/puzzle_17.md)의 1D
 합성곱(convolution) 커널을 그대로 가져와서, MAX 그래프 대신
-[CustomOpLibrary](https://docs.modular.com/max/api/python/torch/)를 사용하여
+[CustomOpLibrary](https://max.modular.com/api/python/torch/)를 사용하여
 PyTorch와 통합합니다.
 
 여기서 핵심은 **동일한 Mojo 커널이 수정 없이 그대로 동작한다**는 것입니다. MAX
@@ -127,7 +127,9 @@ output_tensor = torch.empty_like(input_tensor)
 ### 3. **파라미터 딕셔너리**
 
 ```python
-ops.conv1d[{"input_size": input_tensor.shape[0], "conv_size": kernel_tensor.shape[0]}]
+ops.conv1d[
+    {"input_size": input_tensor.shape[0], "conv_size": kernel_tensor.shape[0]}
+]
 ```
 
 - 파라미터는 딕셔너리 형태로 연산에 전달됩니다

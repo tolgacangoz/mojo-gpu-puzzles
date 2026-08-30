@@ -1,19 +1,25 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.memory import UnsafePointer
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext, HostBuffer, DeviceBuffer
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext, HostBuffer, DeviceBuffer
 from layout import TileTensor
 from layout.tile_layout import row_major, TensorLayout
 from layout.tile_tensor import stack_allocation
 from std.math import exp
 from std.bit import log2_ceil
 from std.utils.numerics import max_finite, min_finite
-import compiler
+import extensibility
 
 from extensibility import InputTensor, OutputTensor
 
@@ -41,7 +47,7 @@ def matmul_idiomatic_tiled[
     OutLayout: TensorLayout,
     ALayout: TensorLayout,
     BLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
     a: TileTensor[mut=True, dtype, ALayout, MutAnyOrigin],
@@ -60,12 +66,12 @@ def matmul_idiomatic_tiled[
     comptime shared_layout = row_major[
         MATMUL_BLOCK_DIM_XY, MATMUL_BLOCK_DIM_XY
     ]()
-    var a_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](shared_layout)
-    var b_shared = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](shared_layout)
+    var a_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        shared_layout
+    )
+    var b_shared = stack_allocation[dtype=dtype, address_space=.SHARED](
+        shared_layout
+    )
     var acc: output.ElementType = 0
 
     var a_lt = a.to_layout_tensor()
@@ -123,7 +129,7 @@ def transpose_kernel[
     cols: Int,
     OutLayout: TensorLayout,
     InLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
     inp: TileTensor[mut=True, dtype, InLayout, MutAnyOrigin],
@@ -135,11 +141,11 @@ def transpose_kernel[
 # ANCHOR_END: transpose_kernel
 
 
-# Apply softmax to attention scores taken from p16
+# Apply softmax to attention scores taken from p18
 def softmax_gpu_kernel[
     input_size: Int,
     LayoutType: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     input: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
@@ -148,12 +154,12 @@ def softmax_gpu_kernel[
         dtype.is_floating_point()
     ), "dtype must be a floating-point type"
     comptime softmax_layout = row_major[SOFTMAX_BLOCK_DIM_X]()
-    var shared_max = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](softmax_layout)
-    var shared_sum = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](softmax_layout)
+    var shared_max = stack_allocation[dtype=dtype, address_space=.SHARED](
+        softmax_layout
+    )
+    var shared_sum = stack_allocation[dtype=dtype, address_space=.SHARED](
+        softmax_layout
+    )
     var global_i = thread_idx.x
     var input_lt = input.to_layout_tensor()
     var output_lt = output.to_layout_tensor()
@@ -212,7 +218,7 @@ def attention_cpu_kernel[
     QLayout: TensorLayout,
     KLayout: TensorLayout,
     VLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
     q: TileTensor[mut=True, dtype, QLayout, MutAnyOrigin],
@@ -261,14 +267,14 @@ def attention_cpu_kernel[
         output_lt[dim] = rebind[Scalar[dtype]](weighted_sum)
 
 
-@compiler.register("attention")
+@extensibility.register("attention")
 struct AttentionCustomOp:
     @staticmethod
     def execute[
         target: StaticString,  # "cpu" or "gpu"
         seq_len: Int,
         d: Int,
-        dtype: DType = DType.float32,
+        dtype: DType = .float32,
     ](
         output: OutputTensor[
             dtype=dtype, rank=1, static_spec=_

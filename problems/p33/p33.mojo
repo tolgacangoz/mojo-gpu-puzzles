@@ -1,15 +1,23 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier, WARP_SIZE
-from std.gpu.host import DeviceContext
+from std.gpu import thread_idx, block_idx, block_dim, WARP_SIZE
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import Layout, LayoutTensor, TileTensor
 from layout.tile_layout import row_major
 from layout.tensor_core import TensorCore
 from layout.layout_tensor import copy_dram_to_sram_async
-from std.gpu.memory import async_copy_wait_all, AddressSpace
+from max.gpu.memory import async_copy_wait_all
 from std.utils import Index
 from std.sys import argv
 from std.testing import assert_equal, assert_almost_equal
@@ -51,13 +59,13 @@ def matmul_idiomatic_tiled[
         dtype,
         Layout.row_major(TILE_SIZE, TILE_SIZE),
         MutAnyOrigin,
-        address_space=AddressSpace.SHARED,
+        address_space=.SHARED,
     ].stack_allocation()
     var b_shared = LayoutTensor[
         dtype,
         Layout.row_major(TILE_SIZE, TILE_SIZE),
         MutAnyOrigin,
-        address_space=AddressSpace.SHARED,
+        address_space=.SHARED,
     ].stack_allocation()
 
     var acc: output.ElementType = 0
@@ -172,13 +180,13 @@ def tensor_core_matrix_multiplication[
         A.dtype,
         Layout.row_major(BM, BK),
         MutAnyOrigin,
-        address_space=AddressSpace.SHARED,
+        address_space=.SHARED,
     ].stack_allocation()
     var B_sram_tile = LayoutTensor[
         B.dtype,
         Layout.row_major(BK, BN),
         MutAnyOrigin,
-        address_space=AddressSpace.SHARED,
+        address_space=.SHARED,
     ].stack_allocation()
 
     # One per-warp accumulator tile of shape [WM, WN]
@@ -186,7 +194,7 @@ def tensor_core_matrix_multiplication[
         C.dtype,
         Layout.row_major(WM, WN),
         MutAnyOrigin,
-        address_space=AddressSpace.LOCAL,
+        address_space=.LOCAL,
     ].stack_allocation()
 
     # Zero initialize accumulator (only for active warps)
@@ -336,9 +344,9 @@ def main() raises:
             print("\n=== Running Idiomatic Tiled Matrix Multiplication ===")
 
             # Create separate buffer for tiled result
-            out_tiled = ctx.enqueue_create_buffer[dtype](SIZE * SIZE)
+            var out_tiled = ctx.enqueue_create_buffer[dtype](SIZE * SIZE)
             out_tiled.enqueue_fill(0)
-            out_tiled_layout = TileTensor(out_tiled, layout)
+            var out_tiled_layout = TileTensor(out_tiled, layout)
 
             # Run idiomatic tiled version with proper 2D block configuration
             comptime kernel = matmul_idiomatic_tiled[SIZE]
@@ -385,6 +393,7 @@ def main() raises:
             )
             ctx.synchronize()
 
+            var tc_success: Bool
             with out_tensor_core.map_to_host() as tc_host:
                 print(
                     "Sample tensor core results:",
@@ -441,9 +450,9 @@ def main() raises:
 
             # Test 2: Idiomatic Tiled vs CPU
             print("\n--- Test 2: Idiomatic Tiled vs CPU Reference ---")
-            out_tiled = ctx.enqueue_create_buffer[dtype](SIZE * SIZE)
+            var out_tiled = ctx.enqueue_create_buffer[dtype](SIZE * SIZE)
             out_tiled.enqueue_fill(0)
-            out_tiled_layout = TileTensor(out_tiled, layout)
+            var out_tiled_layout = TileTensor(out_tiled, layout)
 
             comptime kernel2 = matmul_idiomatic_tiled[SIZE]
             ctx.enqueue_function[kernel2](
@@ -455,6 +464,7 @@ def main() raises:
             )
             ctx.synchronize()
 
+            var tiled_success: Bool
             with out_tiled.map_to_host() as tiled_host:
                 print(
                     "Sample tiled results:",
@@ -506,7 +516,7 @@ def main() raises:
     print("  - Asynchronous memory operations with barriers")
     print(
         "  - Reference:"
-        " https://docs.modular.com/mojo/layout/tensor_core/TensorCore/"
+        " https://max.modular.com/api/mojo/layout/tensor_core/TensorCore/"
     )
 
     print("\nPerformance Analysis:")

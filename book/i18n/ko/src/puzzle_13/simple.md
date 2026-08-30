@@ -1,9 +1,9 @@
-<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
+<!-- i18n-source-commit: f1ede433f4a483e4078e50fe24ed566a15ad90e6 -->
 
 # 단일 블록을 사용한 기본 버전
 
-1D TileTensor `a`와 1D TileTensor `b`의 1D 합성곱을 계산하여 1D TileTensor
-`output`에 저장하는 커널을 구현하세요.
+입력 1D TileTensor `a`와 필터 1D TileTensor `b`의 1D 합성곱을 계산하여 1D
+TileTensor `output`에 저장하는 GPU 커널을 구현하세요.
 
 **참고:** _일반적인 경우를 처리해야 합니다. 스레드당 전역 읽기 2회, 전역 쓰기
 1회만 필요합니다._
@@ -22,15 +22,15 @@
 ## 구성
 
 - 입력 배열 크기: `SIZE = 6`
-- 커널 크기: `CONV = 3`
+- 필터 크기: `CONV = 3`
 - 블록당 스레드 수: `TPB = 8`
 - 블록 수: 1
 - 공유 메모리: `SIZE`와 `CONV` 크기의 배열 2개
 
 참고:
 
-- **데이터 로딩**: 각 스레드가 입력 배열과 커널에서 원소를 하나씩 로드
-- **메모리 패턴**: 입력 배열과 합성곱 커널을 저장하는 공유 배열
+- **데이터 로딩**: 각 스레드가 입력 배열과 필터에서 원소를 하나씩 로드
+- **메모리 패턴**: 입력 배열과 필터를 저장하는 공유 배열
 - **스레드 동기화**: 연산 시작 전 스레드 간 조율
 
 ## 완성할 코드
@@ -48,7 +48,7 @@
 
 1. `stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[SIZE]())`으로
    공유 메모리 할당
-2. 입력을 `shared_a[local_i]`에, 커널을 `shared_b[local_i]`에 로드
+2. 입력을 `shared_a[local_i]`에, 필터를 `shared_b[local_i]`에 로드
 3. 데이터 로드 후 `barrier()` 호출
 4. 경계 안에서 곱을 합산: `if local_i + j < SIZE`
 5. `global_i < SIZE`일 때만 결과 기록
@@ -122,7 +122,7 @@ expected: HostBuffer([5.0, 8.0, 11.0, 14.0, 5.0, 0.0])
 
 ```txt
 입력 배열 a:       [0  1  2  3  4  5]
-커널 b:          [0  1  2]
+필터 b:          [0  1  2]
 ```
 
 ### 연산 과정
@@ -131,7 +131,7 @@ expected: HostBuffer([5.0, 8.0, 11.0, 14.0, 5.0, 0.0])
 
    ```txt
    shared_a: [0  1  2  3  4  5]  // 입력 배열
-   shared_b: [0  1  2]           // 합성곱 커널
+   shared_b: [0  1  2]           // 필터
    ```
 
 2. 각 위치 i에 대한 **합성곱 연산**:
@@ -166,8 +166,7 @@ expected: HostBuffer([5.0, 8.0, 11.0, 14.0, 5.0, 0.0])
      ```mojo
      if global_i < SIZE:
          var local_sum: output.element_type = 0  # var로 타입 추론 활용
-         @parameter  # CONV가 상수이므로 컴파일 타임에 루프 전개
-         for j in range(CONV):
+         comptime for j in range(CONV):  # CONV가 상수이므로 컴파일 타임에 루프 전개
              if local_i + j < SIZE:
                  local_sum += shared_a[local_i + j] * shared_b[j]
          output[global_i] = local_sum
@@ -186,12 +185,12 @@ expected: HostBuffer([5.0, 8.0, 11.0, 14.0, 5.0, 0.0])
 
 2. **주요 구현 특징**:
    - `var`와 `output.element_type`으로 적절한 타입 추론
-   - `@parameter` 데코레이터로 합성곱 루프를 컴파일 타임에 전개
+   - `comptime for`로 합성곱 루프를 컴파일 타임에 전개
    - 엄격한 경계 검사로 메모리 안전성 확보
    - TileTensor의 타입 시스템으로 코드 안전성 향상
 
 3. **메모리 관리**:
-   - 입력 배열과 커널 모두 공유 메모리 사용
+   - 입력 배열과 필터 모두 공유 메모리 사용
    - 스레드당 전역 메모리에서 1회 로드
    - 로드한 데이터의 효율적 재사용
 
@@ -204,7 +203,7 @@ expected: HostBuffer([5.0, 8.0, 11.0, 14.0, 5.0, 0.0])
    - 전역 메모리 접근 최소화
    - 공유 메모리로 빠른 데이터 접근
    - 메인 연산 루프에서 스레드 분기 회피
-   - `@parameter` 데코레이터를 통한 루프 전개
+   - `comptime for`를 통한 루프 전개
 
 </div>
 </details>

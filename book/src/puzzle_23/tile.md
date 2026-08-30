@@ -26,7 +26,7 @@ threads each doing more work with better cache utilization._
 In this puzzle, you'll learn:
 
 - **Tile-based memory organization** for cache optimization
-- **Sequential SIMD processing** within tiles
+- **Sequential processing** within tiles
 - **Memory locality principles** and cache-friendly access patterns
 - **Thread-to-tile mapping** vs thread-to-element mapping
 - **Performance trade-offs** between parallelism and memory efficiency
@@ -42,7 +42,7 @@ hierarchy.
 - Vector size: `SIZE = 1024`
 - Tile size: `TILE_SIZE = 32`
 - Data type: `DType.float32`
-- SIMD width: GPU-dependent (for operations within tiles)
+- SIMD width: GPU-dependent
 - Layout: `row_major[SIZE]()` (1D row-major)
 
 ## Code to complete
@@ -63,7 +63,7 @@ hierarchy.
 The tiled approach divides your data into fixed-size chunks:
 
 ```mojo
-num_tiles = (size + tile_size - 1) // tile_size  # Ceiling division
+var num_tiles = (size + tile_size - 1) // tile_size  # Ceiling division
 ```
 
 For a 1024-element vector with `TILE_SIZE=32`: `1024 ÷ 32 = 32` tiles exactly.
@@ -71,13 +71,13 @@ For a 1024-element vector with `TILE_SIZE=32`: `1024 ÷ 32 = 32` tiles exactly.
 ### 2. **Tile extraction pattern**
 
 Check out the
-[TileTensor `.tile` documentation](https://docs.modular.com/mojo/layout/tile_tensor/TileTensor/#tile).
+[TileTensor `.tile` documentation](https://max.modular.com/api/mojo/layout/tile_tensor/TileTensor/#tile).
 
 ```mojo
-tile_id = indices[0]  # Each thread gets one tile to process
-out_tile = output.tile[tile_size](tile_id)
-a_tile = a.tile[tile_size](tile_id)
-b_tile = b.tile[tile_size](tile_id)
+var tile_id = Int(indices[0].value())  # Each thread gets one tile to process
+var output_tile = output.tile[tile_size](tile_id).to_layout_tensor()
+var a_tile = a.tile[tile_size](tile_id).to_layout_tensor()
+var b_tile = b.tile[tile_size](tile_id).to_layout_tensor()
 ```
 
 The `tile[size](id)` method creates a view of `size` consecutive elements
@@ -88,30 +88,32 @@ starting at `id × size`.
 Unlike elementwise, you process the tile sequentially:
 
 ```mojo
-@parameter
-for i in range(tile_size):
+comptime for i in range(tile_size):
     # Process element i within the current tile
 ```
 
-This `@parameter` loop unrolls at compile-time for optimal performance.
+This `comptime for` loop unrolls at compile-time for optimal performance.
 
-### 4. **SIMD operations within tile elements**
+### 4. **Load and store within tile elements**
 
 ```mojo
-a_vec = a_tile.load[simd_width](Index(i))  # Load from position i in tile
-b_vec = b_tile.load[simd_width](Index(i))  # Load from position i in tile
-result = a_vec + b_vec                 # SIMD addition (GPU-dependent width)
-out_tile.store[simd_width](Index(i), result)  # Store to position i in tile
+var a_vec = a_tile.aligned_load[width=simd_width](Index(i))  # Load from position i in tile
+var b_vec = b_tile.aligned_load[width=simd_width](Index(i))  # Load from position i in tile
+var result = a_vec + b_vec                       # Addition at width simd_width
+output_tile.store[simd_width](Index(i), result)  # Store to position i in tile
 ```
+
+Here `simd_width` is the inner function's own parameter, which the launch below
+binds to 1—see the solution for why.
 
 ### 5. **Thread configuration difference**
 
 ```mojo
-elementwise[process_tiles, 1, target="gpu"](num_tiles, ctx)
+elementwise[simd_width=1, target="gpu"](process_tiles, Coord(num_tiles), ctx)
 ```
 
-Note the `1` instead of `SIMD_WIDTH` - each thread processes one entire tile
-sequentially.
+Note the `simd_width=1` instead of `SIMD_WIDTH` - each thread processes one
+entire tile sequentially.
 
 ### 6. **Memory access pattern insight**
 
@@ -123,8 +125,8 @@ execution.
 
 With tiling, you'll see fewer thread launches but each does more work:
 
-- Elementwise: ~256 threads (for SIMD_WIDTH=4), each processing 4 elements
-- Tiled: ~32 threads, each processing 32 elements sequentially
+- Elementwise: 256 invocations (for SIMD_WIDTH=4), each covering 4 elements
+- Tiled: 32 invocations, each walking 32 elements one at a time
 
 </div>
 </details>
@@ -176,14 +178,6 @@ Your output will look like this when not yet solved:
 SIZE: 1024
 simd_width: 4
 tile size: 32
-tile_id: 0
-tile_id: 1
-tile_id: 2
-tile_id: 3
-...
-tile_id: 29
-tile_id: 30
-tile_id: 31
 out: HostBuffer([0.0, 0.0, 0.0, ..., 0.0, 0.0, 0.0])
 expected: HostBuffer([1.0, 5.0, 9.0, ..., 4085.0, 4089.0, 4093.0])
 ```
@@ -209,22 +203,23 @@ Tiling represents a fundamental shift in how we think about parallel processing:
 **Elementwise approach:**
 
 - **Wide parallelism**: Many threads, each doing minimal work
-- **Global memory pressure**: Threads scattered across entire array
-- **Cache misses**: Poor spatial locality across thread boundaries
+- **Small per-thread footprint**: Each thread touches only `SIMD_WIDTH` elements
+- **Coalesced access**: Consecutive threads cover one contiguous run of memory
 
 **Tiled approach:**
 
 - **Deep parallelism**: Fewer threads, each doing substantial work
 - **Localized memory access**: Each thread works on contiguous data
-- **Cache optimization**: Excellent spatial and temporal locality
+- **Per-thread locality**: Spatial locality within a thread, traded against
+  warp-level coalescing (see below)
 
 ### 2. **Tile organization and indexing**
 
 ```mojo
-tile_id = indices[0]
-out_tile = output.tile[tile_size](tile_id)
-a_tile = a.tile[tile_size](tile_id)
-b_tile = b.tile[tile_size](tile_id)
+var tile_id = Int(indices[0].value())
+var output_tile = output.tile[tile_size](tile_id).to_layout_tensor()
+var a_tile = a.tile[tile_size](tile_id).to_layout_tensor()
+var b_tile = b.tile[tile_size](tile_id).to_layout_tensor()
 ```
 
 **Tile mapping visualization (TILE_SIZE=32):**
@@ -248,33 +243,43 @@ Tile 31 (thread 31): [992, 993, ..., 1023] ← Elements 992-1023
 ### 3. **Sequential processing deep dive**
 
 ```mojo
-@parameter
-for i in range(tile_size):
-    a_vec = a_tile.load[simd_width](Index(i))
-    b_vec = b_tile.load[simd_width](Index(i))
-    ret = a_vec + b_vec
-    out_tile.store[simd_width](Index(i), ret)
+comptime for i in range(tile_size):
+    var a_vec = a_tile.aligned_load[width=simd_width](Index(i))
+    var b_vec = b_tile.aligned_load[width=simd_width](Index(i))
+    var ret = a_vec + b_vec
+    output_tile.store[simd_width](Index(i), ret)
 ```
 
 **Why sequential processing?**
 
 - **Cache optimization**: Consecutive memory accesses maximize cache hit rates
-- **Compiler optimization**: `@parameter` loops unroll completely at
+- **Compiler optimization**: `comptime for` loops unroll completely at
   compile-time
-- **Memory bandwidth**: Sequential access aligns with memory controller design
-- **Reduced coordination**: No need to synchronize between SIMD groups
+- **Predictable addresses**: Each thread's addresses advance by one element per
+  step, which the compiler folds into the unrolled loop
+- **Reduced coordination**: One thread owns a whole tile, so there is nothing to
+  synchronize
 
-**Execution pattern within one tile (TILE_SIZE=32, SIMD_WIDTH=4):**
+**Execution pattern within one tile (TILE_SIZE=32):**
 
 ```text
-Thread processes tile sequentially:
-Step 0: Process elements [0:4] with SIMD
-Step 1: Process elements [4:8] with SIMD
-Step 2: Process elements [8:12] with SIMD
+Thread processes tile sequentially, one element per iteration:
+Step 0:  Load/store element [0]
+Step 1:  Load/store element [1]
+Step 2:  Load/store element [2]
 ...
-Step 7: Process elements [28:32] with SIMD
-Total: 8 SIMD operations per thread (32 ÷ 4 = 8)
+Step 31: Load/store element [31]
+Total: 32 scalar operations per thread (comptime for i in range(tile_size))
 ```
+
+The width here is 1, not `SIMD_WIDTH`. The inner `process_tiles` declares its
+own `simd_width` parameter, which shadows the enclosing function's, and
+`elementwise[simd_width=1, target="gpu"](process_tiles, Coord(num_tiles), ctx)`
+instantiates it with 1. So `aligned_load[width=simd_width]` loads a single element and the loop
+walks the tile one element at a time. The two vectorized kernels later in this
+puzzle avoid the shadowing by naming their inner parameter
+`num_threads_per_tile`, which is why they really do load `SIMD_WIDTH` elements
+at a time.
 
 ### 4. **Memory access pattern analysis**
 
@@ -283,10 +288,11 @@ Total: 8 SIMD operations per thread (32 ÷ 4 = 8)
 **Elementwise pattern:**
 
 ```text
-Thread 0: accesses global positions [0, 4, 8, 12, ...]    ← Stride = SIMD_WIDTH
-Thread 1: accesses global positions [4, 8, 12, 16, ...]   ← Stride = SIMD_WIDTH
+Thread 0: accesses positions [0:4]                        ← One SIMD chunk
+Thread 1: accesses positions [4:8]                        ← Next SIMD chunk
 ...
-Result: Memory accesses spread across entire array
+Result: Each thread touches one small chunk, and the chunks spread across
+        the entire array
 ```
 
 **Tiled pattern:**
@@ -301,17 +307,20 @@ Result: Perfect spatial locality within each thread
 **Cache efficiency implications:**
 
 - **L1 cache**: Small tiles often fit better in L1 cache, reducing cache misses
-- **Memory bandwidth**: Sequential access maximizes effective bandwidth
-- **TLB efficiency**: Fewer translation lookbook buffer misses
-- **Prefetching**: Hardware prefetchers work optimally with sequential patterns
+- **TLB efficiency**: Fewer translation lookaside buffer misses
+- **Coalescing caveat**: GPUs have no hardware prefetcher, and coalescing is a
+  per-warp property, not a per-thread one. Because each thread walks its own
+  tile, on any single iteration the lanes of a warp sit `tile_size` elements
+  apart - this pattern buys per-thread sequentiality at the cost of warp-level
+  coalescing
 
 ### 5. **Thread configuration strategy**
 
 ```mojo
-elementwise[process_tiles, 1, target="gpu"](num_tiles, ctx)
+elementwise[simd_width=1, target="gpu"](process_tiles, Coord(num_tiles), ctx)
 ```
 
-**Why `1` instead of `SIMD_WIDTH`?**
+**Why `simd_width=1` instead of `SIMD_WIDTH`?**
 
 - **Thread count**: Launch exactly `num_tiles` threads, not
   `num_tiles × SIMD_WIDTH`
@@ -325,7 +334,8 @@ elementwise[process_tiles, 1, target="gpu"](num_tiles, ctx)
   occupancy
 - **More work per thread**: Better cache utilization and reduced coordination
   overhead
-- **Sequential access**: Optimal memory bandwidth utilization within each thread
+- **Sequential access**: Each thread's own stream of addresses is contiguous,
+  though the warp's are not
 - **Reduced overhead**: Less thread launch and coordination overhead
 
 **Important note**: "Fewer threads" refers to the logical programming model. The

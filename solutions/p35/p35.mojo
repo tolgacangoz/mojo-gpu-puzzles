@@ -1,17 +1,25 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 from std.gpu import thread_idx, block_dim, block_idx
-from std.gpu.host import DeviceContext
-from std.gpu.host.compile import get_gpu_target
+from max.gpu.host import DeviceContext
+from max.gpu.host.compile import get_gpu_target
 from layout import TileTensor
 from layout.tile_layout import row_major
 from std.utils import Index
 from std.sys import argv, align_of, simd_width_of
 from std.testing import assert_almost_equal
 from std.benchmark import Bench, BenchConfig, Bencher, BenchId, keep
+from max.benchmark import bencher_iter_custom
 
 # 1M float32 elements: large enough to be memory-bandwidth bound, so the
 # load/store path is what the benchmark actually measures.
@@ -39,12 +47,13 @@ comptime SCALAR_ALIGN = align_of[dtype]()
 def scalar_kernel(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
     """One element per thread. No vectorization, so alignment is irrelevant.
 
     This is the baseline: each thread issues a scalar load and a scalar store.
     """
+    var size = Int(size_dev)
     var i = block_dim.x * block_idx.x + thread_idx.x
     if i < size:
         output[i] = a[i] * SCALE + BIAS
@@ -57,7 +66,7 @@ def scalar_kernel(
 def unaligned_kernel(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
     """Vectorized by SIMD_WIDTH, but the access alignment is *under-stated*.
 
@@ -67,6 +76,7 @@ def unaligned_kernel(
     `ld.global.nc.f32` / `st.global.f32` instructions instead of the vectorized
     `.v4` form. The alignment trap: correct results, but lost bandwidth.
     """
+    var size = Int(size_dev)
     var a_lt = a.to_layout_tensor()
     var out_lt = output.to_layout_tensor()
 
@@ -88,7 +98,7 @@ def unaligned_kernel(
 def aligned_kernel(
     output: TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin],
     a: TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin],
-    size: Int,
+    size_dev: Int32,
 ):
     """Same vectorized kernel, but the access alignment is communicated.
 
@@ -98,6 +108,7 @@ def aligned_kernel(
     convenience wrapper that picks this alignment for you. Identical output to
     the unaligned kernel — only the codegen (and the bandwidth) changes.
     """
+    var size = Int(size_dev)
     var a_lt = a.to_layout_tensor()
     var out_lt = output.to_layout_tensor()
 
@@ -147,7 +158,7 @@ def test_scalar() raises:
         ctx.enqueue_function[scalar_kernel](
             out_tensor,
             a_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=(scalar_blocks(SIZE), 1),
             block_dim=(TPB, 1),
         )
@@ -178,7 +189,7 @@ def test_unaligned() raises:
         ctx.enqueue_function[unaligned_kernel](
             out_tensor,
             a_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=(vector_blocks(SIZE), 1),
             block_dim=(TPB, 1),
         )
@@ -209,7 +220,7 @@ def test_aligned() raises:
         ctx.enqueue_function[aligned_kernel](
             out_tensor,
             a_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=(vector_blocks(SIZE), 1),
             block_dim=(TPB, 1),
         )
@@ -226,107 +237,113 @@ def test_aligned() raises:
 # ---------------------------------------------------------------------------- #
 
 
-@parameter
 @always_inline
 def benchmark_scalar(mut b: Bencher) raises:
-    @parameter
+    # Allocation, fill and tensor construction stay OUTSIDE the timed closure:
+    # at 1M elements the setup dominates the kernel and the reported figure
+    # stops being about the kernel at all.
+    var bench_ctx = DeviceContext()
+    var out = bench_ctx.enqueue_create_buffer[dtype](SIZE)
+    out.enqueue_fill(0)
+    var a = bench_ctx.enqueue_create_buffer[dtype](SIZE)
+    a.enqueue_fill(1)
+    var a_tensor = TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin](
+        a, layout
+    )
+    var out_tensor = TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin](
+        out, layout
+    )
+
     @always_inline
-    def workflow(ctx: DeviceContext) raises:
-        var out = ctx.enqueue_create_buffer[dtype](SIZE)
-        out.enqueue_fill(0)
-        var a = ctx.enqueue_create_buffer[dtype](SIZE)
-        a.enqueue_fill(1)
-        var a_tensor = TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin](
-            a, layout
-        )
-        var out_tensor = TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin](
-            out, layout
-        )
+    def workflow(ctx: DeviceContext) raises {imm}:
         ctx.enqueue_function[scalar_kernel](
             out_tensor,
             a_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=(scalar_blocks(SIZE), 1),
             block_dim=(TPB, 1),
         )
         keep(out.unsafe_ptr())
         ctx.synchronize()
 
-    var bench_ctx = DeviceContext()
-    b.iter_custom[workflow](bench_ctx)
+    bencher_iter_custom(b, workflow, bench_ctx)
 
 
-@parameter
 @always_inline
 def benchmark_unaligned(mut b: Bencher) raises:
-    @parameter
+    # Allocation, fill and tensor construction stay OUTSIDE the timed closure:
+    # at 1M elements the setup dominates the kernel and the reported figure
+    # stops being about the kernel at all.
+    var bench_ctx = DeviceContext()
+    var out = bench_ctx.enqueue_create_buffer[dtype](SIZE)
+    out.enqueue_fill(0)
+    var a = bench_ctx.enqueue_create_buffer[dtype](SIZE)
+    a.enqueue_fill(1)
+    var a_tensor = TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin](
+        a, layout
+    )
+    var out_tensor = TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin](
+        out, layout
+    )
+
     @always_inline
-    def workflow(ctx: DeviceContext) raises:
-        var out = ctx.enqueue_create_buffer[dtype](SIZE)
-        out.enqueue_fill(0)
-        var a = ctx.enqueue_create_buffer[dtype](SIZE)
-        a.enqueue_fill(1)
-        var a_tensor = TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin](
-            a, layout
-        )
-        var out_tensor = TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin](
-            out, layout
-        )
+    def workflow(ctx: DeviceContext) raises {imm}:
         ctx.enqueue_function[unaligned_kernel](
             out_tensor,
             a_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=(vector_blocks(SIZE), 1),
             block_dim=(TPB, 1),
         )
         keep(out.unsafe_ptr())
         ctx.synchronize()
 
-    var bench_ctx = DeviceContext()
-    b.iter_custom[workflow](bench_ctx)
+    bencher_iter_custom(b, workflow, bench_ctx)
 
 
-@parameter
 @always_inline
 def benchmark_aligned(mut b: Bencher) raises:
-    @parameter
+    # Allocation, fill and tensor construction stay OUTSIDE the timed closure:
+    # at 1M elements the setup dominates the kernel and the reported figure
+    # stops being about the kernel at all.
+    var bench_ctx = DeviceContext()
+    var out = bench_ctx.enqueue_create_buffer[dtype](SIZE)
+    out.enqueue_fill(0)
+    var a = bench_ctx.enqueue_create_buffer[dtype](SIZE)
+    a.enqueue_fill(1)
+    var a_tensor = TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin](
+        a, layout
+    )
+    var out_tensor = TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin](
+        out, layout
+    )
+
     @always_inline
-    def workflow(ctx: DeviceContext) raises:
-        var out = ctx.enqueue_create_buffer[dtype](SIZE)
-        out.enqueue_fill(0)
-        var a = ctx.enqueue_create_buffer[dtype](SIZE)
-        a.enqueue_fill(1)
-        var a_tensor = TileTensor[mut=False, dtype, LayoutType, ImmutAnyOrigin](
-            a, layout
-        )
-        var out_tensor = TileTensor[mut=True, dtype, LayoutType, MutAnyOrigin](
-            out, layout
-        )
+    def workflow(ctx: DeviceContext) raises {imm}:
         ctx.enqueue_function[aligned_kernel](
             out_tensor,
             a_tensor,
-            SIZE,
+            Int32(SIZE),
             grid_dim=(vector_blocks(SIZE), 1),
             block_dim=(TPB, 1),
         )
         keep(out.unsafe_ptr())
         ctx.synchronize()
 
-    var bench_ctx = DeviceContext()
-    b.iter_custom[workflow](bench_ctx)
+    bencher_iter_custom(b, workflow, bench_ctx)
 
 
 def main() raises:
     if len(argv()) < 2:
         print(
-            "Usage: mojo p35.mojo [--simple] [--unaligned] [--aligned]"
+            "Usage: mojo p35.mojo [--scalar] [--unaligned] [--aligned]"
             " [--benchmark]"
         )
         return
 
     print("SIZE:", SIZE, "SIMD_WIDTH:", SIMD_WIDTH)
 
-    if argv()[1] == "--simple":
+    if argv()[1] == "--scalar":
         test_scalar()
         print("Puzzle 35 complete ✅")
     elif argv()[1] == "--unaligned":
@@ -341,19 +358,19 @@ def main() raises:
         var bench = Bench(BenchConfig(max_iters=100, num_warmup_iters=10))
 
         print("\nScalar (one element per thread):")
-        bench.bench_function[benchmark_scalar](BenchId("scalar"))
+        bench.bench_function(benchmark_scalar, BenchId("scalar"))
 
         print("\nVectorized, under-stated alignment (scalar codegen):")
-        bench.bench_function[benchmark_unaligned](BenchId("unaligned"))
+        bench.bench_function(benchmark_unaligned, BenchId("unaligned"))
 
         print("\nVectorized, aligned (ld.global.nc.v4 codegen):")
-        bench.bench_function[benchmark_aligned](BenchId("aligned"))
+        bench.bench_function(benchmark_aligned, BenchId("aligned"))
 
         bench.dump_report()
         print("\nProfile with NSight Compute to confirm the codegen change!")
     else:
         print("Unknown argument:", argv()[1])
         print(
-            "Usage: mojo p35.mojo [--simple] [--unaligned] [--aligned]"
+            "Usage: mojo p35.mojo [--scalar] [--unaligned] [--aligned]"
             " [--benchmark]"
         )

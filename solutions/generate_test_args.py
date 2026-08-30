@@ -1,8 +1,14 @@
-#!/usr/bin/env python3
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 """Generate test_args.bzl content from Mojo solution files.
 
@@ -63,9 +69,7 @@ def _extract_flags(path: Path) -> list[str]:
 
 def main() -> None:
     source_files = sorted(
-        Path(f)
-        for f in sys.argv[1:]
-        if f.endswith(".mojo") or f.endswith(".py")
+        Path(f) for f in sys.argv[1:] if f.endswith((".mojo", ".py"))
     )
 
     mapping: dict[str, list[str]] = {}

@@ -1,8 +1,15 @@
 #!/bin/bash
 ##===----------------------------------------------------------------------===##
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 ##===----------------------------------------------------------------------===##
 # Serve English + all translated mdbook languages with live reload.
 #
@@ -12,11 +19,19 @@
 # - Symlinks book/html/{lang} -> ../html-{lang} bridge the outputs.
 #
 # Usage: pixi run book
+#        pixi run book --offline   # also pre-fetch the runtime fallback assets,
+#                                   # so the book is ready to browse with no
+#                                   # network access right away
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BOOK_DIR="$(cd "$SCRIPT_DIR/../book" && pwd)"
+
+OFFLINE_MODE=false
+for arg in "$@"; do
+    [[ "$arg" == "--offline" ]] && OFFLINE_MODE=true
+done
 
 # Discover translation languages from book/i18n/*/book.toml
 LANGS=()
@@ -41,7 +56,9 @@ ensure_symlinks() {
 }
 
 # Build both (translations to separate directories)
-bash "$SCRIPT_DIR/build_book.sh" --serve
+BUILD_ARGS=(--serve)
+$OFFLINE_MODE && BUILD_ARGS+=(--offline)
+bash "$SCRIPT_DIR/build_book.sh" "${BUILD_ARGS[@]}"
 ensure_symlinks
 
 # Background: translation watchers + symlink restorer

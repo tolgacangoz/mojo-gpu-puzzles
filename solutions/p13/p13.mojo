@@ -1,11 +1,18 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -34,12 +41,12 @@ def conv_1d_simple(
 ):
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
-    var shared_a = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[SIZE]())
-    var shared_b = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[CONV]())
+    var shared_a = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[SIZE]()
+    )
+    var shared_b = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[CONV]()
+    )
     if global_i < SIZE:
         shared_a[local_i] = a[global_i]
 
@@ -48,7 +55,8 @@ def conv_1d_simple(
 
     barrier()
 
-    # Note: this is unsafe as it enforces no guard so could access `shared_a` beyond its bounds
+    # Note: this variant is wasteful, not unsafe — the `local_i + j < SIZE` guard
+    # keeps every access inside `shared_a`; it just re-tests the bound per tap.
     # local_sum = Scalar[dtype](0)
     # for j in range(CONV):
     #     if local_i + j < SIZE:
@@ -63,8 +71,7 @@ def conv_1d_simple(
         # `out.ElementType` is available in TileTensor
         var local_sum: output.ElementType = 0
 
-        # Note: `@parameter` decorator unrolls the loop at compile time given `CONV` is a compile-time constant
-        # See: https://docs.modular.com/mojo/manual/decorators/parameter/#parametric-for-statement
+        # Note: `comptime for` unrolls the loop at compile time given `CONV` is a compile-time constant
         comptime for j in range(CONV):
             # Bonus: do we need this check for this specific example with fixed SIZE, CONV
             if local_i + j < SIZE:
@@ -96,12 +103,12 @@ def conv_1d_block_boundary(
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
     # first: need to account for padding
-    var shared_a = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[TPB + CONV_2 - 1]())
-    var shared_b = stack_allocation[
-        dtype=dtype, address_space=AddressSpace.SHARED
-    ](row_major[CONV_2]())
+    var shared_a = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[TPB + CONV_2 - 1]()
+    )
+    var shared_b = stack_allocation[dtype=dtype, address_space=.SHARED](
+        row_major[CONV_2]()
+    )
     if global_i < SIZE_2:
         shared_a[local_i] = a[global_i]
     else:

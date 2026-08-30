@@ -1,11 +1,19 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
 from std.math import ceildiv
-from std.gpu import thread_idx, block_idx, block_dim, grid_dim, barrier
-from std.gpu.host import DeviceContext
+from std.gpu import thread_idx, block_idx, block_dim, grid_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
 from layout import TileTensor
 from layout.tile_layout import row_major, TensorLayout
 from std.sys import argv
@@ -23,10 +31,10 @@ def embedding_kernel_coalesced[
     OutLayout: TensorLayout,
     IndicesLayout: TensorLayout,
     WeightsLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
-    indices: TileTensor[mut=True, DType.int32, IndicesLayout, MutAnyOrigin],
+    indices: TileTensor[mut=True, .int32, IndicesLayout, MutAnyOrigin],
     weights: TileTensor[mut=True, dtype, WeightsLayout, MutAnyOrigin],
 ):
     """
@@ -71,10 +79,10 @@ def embedding_kernel_2d[
     OutLayout: TensorLayout,
     IndicesLayout: TensorLayout,
     WeightsLayout: TensorLayout,
-    dtype: DType = DType.float32,
+    dtype: DType = .float32,
 ](
     output: TileTensor[mut=True, dtype, OutLayout, MutAnyOrigin],
-    indices: TileTensor[mut=True, DType.int32, IndicesLayout, MutAnyOrigin],
+    indices: TileTensor[mut=True, .int32, IndicesLayout, MutAnyOrigin],
     weights: TileTensor[mut=True, dtype, WeightsLayout, MutAnyOrigin],
 ):
     """
@@ -112,14 +120,13 @@ def embedding_kernel_2d[
 
 # ANCHOR_END: embedding_kernel_2d
 
-import compiler
+import extensibility
 
 from extensibility import InputTensor, OutputTensor
-from std.memory import UnsafePointer
-from std.gpu.host import DeviceBuffer
+from max.gpu.host import DeviceBuffer
 
 
-@compiler.register("embedding")
+@extensibility.register("embedding")
 struct EmbeddingCustomOp:
     @staticmethod
     def execute[
@@ -151,7 +158,7 @@ struct EmbeddingCustomOp:
             mut=True, output.dtype, OutLayout, MutAnyOrigin
         ](output.unsafe_ptr(), out_layout_val)
         var indices_tensor = TileTensor[
-            mut=True, DType.int32, IndicesLayout, MutAnyOrigin
+            mut=True, .int32, IndicesLayout, MutAnyOrigin
         ](indices.unsafe_ptr(), indices_layout_val)
         var weights_tensor = TileTensor[
             mut=True, output.dtype, WeightsLayout, MutAnyOrigin
@@ -210,7 +217,7 @@ struct EmbeddingCustomOp:
             raise Error("Unsupported target: " + target)
 
 
-@compiler.register("embedding_2d")
+@extensibility.register("embedding_2d")
 struct Embedding2DCustomOp:
     @staticmethod
     def execute[
@@ -242,7 +249,7 @@ struct Embedding2DCustomOp:
             mut=True, output.dtype, OutLayout, MutAnyOrigin
         ](output.unsafe_ptr(), out_layout_val)
         var indices_tensor = TileTensor[
-            mut=True, DType.int32, IndicesLayout, MutAnyOrigin
+            mut=True, .int32, IndicesLayout, MutAnyOrigin
         ](indices.unsafe_ptr(), indices_layout_val)
         var weights_tensor = TileTensor[
             mut=True, output.dtype, WeightsLayout, MutAnyOrigin

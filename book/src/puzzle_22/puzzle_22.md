@@ -2,7 +2,7 @@
 
 > ## Kernel fusion and autograd integration
 >
-> We're continuing Part IV with a focus on **kernel fusion** and
+> We're continuing Part V with a focus on **kernel fusion** and
 > **autograd integration**.
 >
 > Building on [Puzzle 21](../puzzle_21/puzzle_21.md), you'll now explore how to
@@ -48,7 +48,7 @@ x = torch.randn(batch_size, seq_len, hidden_dim)
 
 # LayerNorm parameters
 ln_weight = torch.ones(hidden_dim)  # scale parameter (γ)
-ln_bias = torch.zeros(hidden_dim)   # shift parameter (β)
+ln_bias = torch.zeros(hidden_dim)  # shift parameter (β)
 
 # Linear layer parameters
 linear_weight = torch.randn(output_dim, hidden_dim)
@@ -60,7 +60,9 @@ output = F.linear(ln_output, linear_weight, linear_bias)
 
 # Fused operation (custom implementation)
 # This is what you'll implement in this puzzle
-output_fused = fused_layernorm_linear(x, ln_weight, ln_bias, linear_weight, linear_bias)
+output_fused = fused_layernorm_linear(
+    x, ln_weight, ln_bias, linear_weight, linear_bias
+)
 ```
 
 When fused, these operations are combined into a single efficient kernel that:
@@ -70,8 +72,11 @@ When fused, these operations are combined into a single efficient kernel that:
 - Improves cache utilization
 - Eliminates intermediate allocations
 
-In practice, this fusion can provide up to 1.5-2x speedup in both forward and
-backward passes, which is crucial for transformer training efficiency.
+In production transformer stacks, this kind of fusion is a standard way to cut
+memory traffic and launch overhead in both the forward and backward passes. The
+tensors in this puzzle are deliberately tiny (`[4, 4, 8]` to `[4, 4, 16]`), so
+dispatch cost dominates and the measured gap between fused and unfused is
+small. Focus on the technique rather than the timings you see.
 
 ### Why custom backward passes matter
 
@@ -129,7 +134,6 @@ The puzzle includes a comprehensive testing framework that verifies:
 - Performance comparison between our CPU and GPU implementations
 - Gradient computation accuracy for all parameters (input, LayerNorm
   weights/bias, Linear weights/bias)
-- Memory usage optimization through kernel fusion
 
 💡 **Success tip:** Pay attention to how the different implementations (fused vs
 unfused) affect both forward and backward pass performance - this insight

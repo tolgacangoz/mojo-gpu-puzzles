@@ -2,7 +2,7 @@
 
 ## Overview
 
-Implement a kernel that compute the running sum of the last 3 positions of 1D
+Implement a kernel that computes the running sum of the last 3 positions of 1D
 TileTensor `a` and stores it in 1D TileTensor `output`.
 
 **Pooling** is an operation that condenses a region of values into a single
@@ -202,7 +202,6 @@ steps:
    - One global read per thread into shared tensor
    - Efficient neighbor access through shared memory
    - TileTensor benefits:
-     - Automatic bounds checking
      - Natural window indexing
      - Layout-aware memory access
      - Type safety throughout

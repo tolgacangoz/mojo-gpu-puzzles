@@ -1,4 +1,4 @@
-<!-- i18n-source-commit: 19dfa37b22cd58ed566fcd5cb2f52ec00e453202 -->
+<!-- i18n-source-commit: f1ede433f4a483e4078e50fe24ed566a15ad90e6 -->
 
 # Puzzle 13: 1D 합성곱
 
@@ -7,8 +7,8 @@
 > 지금까지 GPU 퍼즐 여정에서 GPU 메모리 관리에 대한 두 가지 접근 방식을 함께
 > 살펴보았습니다:
 >
-> 1. [UnsafePointer](https://docs.modular.com/mojo/std/memory/unsafe_pointer/UnsafePointer/)를 사용한 포인터 직접 조작 방식의 raw 메모리 관리
-> 2. 강력한 `address_space` 파라미터로 메모리를 할당하는, 보다 구조화된 [TileTensor](https://docs.modular.com/mojo/layout/tile_tensor/TileTensor/)
+> 1. [Pointer](https://mojolang.org/docs/std/memory/pointer/Pointer/)를 사용한 포인터 직접 조작 방식의 raw 메모리 관리
+> 2. 강력한 `address_space` 파라미터로 메모리를 할당하는, 보다 구조화된 [TileTensor](https://max.modular.com/api/mojo/layout/tile_tensor/TileTensor/)
 >
 > 이 퍼즐부터는 `TileTensor`로 완전히 전환합니다. 이 추상화는 다음과 같은 이점을
 > 제공합니다:
@@ -26,11 +26,11 @@
 ## 개요
 
 신호 처리와 이미지 분석에서 합성곱(convolution)은 두 시퀀스를 결합해 새로운
-시퀀스를 만들어내는 핵심 연산입니다. 이 퍼즐에서는 입력 배열 위로 커널을
+시퀀스를 만들어내는 핵심 연산입니다. 이 퍼즐에서는 입력 배열 위로 필터를
 슬라이딩하면서 각 출력 원소를 계산하는 1D 합성곱을 GPU에서 구현해 봅니다.
 
-`TileTensor` 추상화를 사용하여 벡터 `a`와 벡터 `b`의 1D 합성곱을 계산하고,
-결과를 `output`에 저장하는 커널을 구현하세요.
+`TileTensor` 추상화를 사용하여 입력 벡터 `a`와 필터 벡터 `b`의 1D 합성곱을
+계산하고, 결과를 `output`에 저장하는 GPU 커널을 구현하세요.
 
 **참고:** _일반적인 경우를 처리해야 합니다. 스레드당 전역 읽기 2회, 전역 쓰기
 1회만 필요합니다._
@@ -39,7 +39,7 @@
 <img src="/puzzle_13/media/13-b.png" alt="1D 합성곱 시각화" class="dark-mode-img">
 
 합성곱이 처음이라면, 가중치가 적용된 슬라이딩 윈도우 연산이라고 생각하면 됩니다.
-각 위치에서 커널 값과 대응하는 입력 값을 곱한 뒤 합산합니다. 수학적 표기로는
+각 위치에서 필터 값과 대응하는 입력 값을 곱한 뒤 합산합니다. 수학적 표기로는
 다음과 같습니다:
 
 \\[\Large output[i] = \sum_{j=0}^{\text{CONV}-1} a[i+j] \cdot b[j] \\]

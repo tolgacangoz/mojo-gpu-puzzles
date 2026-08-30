@@ -2,10 +2,10 @@
 
 ## Overview
 
-**Part VI: Functional GPU Programming** introduces Mojo's high-level programming
-patterns for GPU computation. You'll learn functional approaches that
-automatically handle vectorization, memory optimization, and performance tuning,
-replacing manual GPU kernel programming.
+**Part VI: Mojo Functional Patterns and Benchmarking** introduces Mojo's
+high-level programming patterns for GPU computation. You'll learn functional
+approaches that automatically handle vectorization, memory optimization, and
+performance tuning, replacing manual GPU kernel programming.
 
 **Key insight:** _Modern GPU programming doesn't require sacrificing elegance
 for performance - Mojo's functional patterns give you both._
@@ -20,7 +20,7 @@ Understand the fundamental relationship between GPU threads and SIMD operations:
 GPU Device
 ├── Grid (your entire problem)
 │   ├── Block 1 (group of threads, shared memory)
-│   │   ├── Warp 1 (32 threads, lockstep execution) --> We'll learn in Part VI
+│   │   ├── Warp 1 (32 threads, lockstep execution) --> We'll learn in Part VII
 │   │   │   ├── Thread 1 → SIMD
 │   │   │   ├── Thread 2 → SIMD
 │   │   │   └── ... (32 threads total)
@@ -53,10 +53,10 @@ Learn the complete spectrum of GPU functional programming:
 ```text
 Problem: Add two 1024-element vectors (SIZE=1024, SIMD_WIDTH=4)
 
-Elementwise:     256 threads × 1 SIMD op   = High parallelism
-Tiled:           32 threads  × 8 SIMD ops  = Cache optimization
-Manual:          8 threads   × 32 SIMD ops = Maximum control
-Mojo vectorize:  32 threads  × 8 SIMD ops  = Automatic safety
+Elementwise:     256 threads × 1 SIMD op     = High parallelism
+Tiled:           32 threads  × 32 scalar ops = Cache optimization
+Manual:          8 threads   × 32 SIMD ops   = Maximum control
+Mojo vectorize:  32 threads  × 8 SIMD ops    = Automatic safety
 ```
 
 ### 📊 **Real performance insights**
@@ -65,10 +65,10 @@ Learn to interpret empirical benchmark results:
 
 ```text
 Benchmark Results (SIZE=1,048,576):
-elementwise:        11.34ms  ← Maximum parallelism wins at scale
-tiled:              12.04ms  ← Good balance of locality and parallelism
-manual_vectorized:  15.75ms  ← Complex indexing hurts simple operations
-vectorized:         13.38ms  ← Automatic optimization overhead
+elementwise:        0.005ms  ← Coalesced access and maximum parallelism win
+vectorized:         0.149ms  ← Automatic vectorization, some bandwidth lost
+tiled:              0.260ms  ← Uncoalesced access with single-element loads
+manual_vectorized:  0.585ms  ← Uncoalesced access plus complex indexing
 ```
 
 ## Prerequisites
@@ -77,7 +77,7 @@ Before diving into functional patterns, ensure you're comfortable with:
 
 - **Basic GPU concepts**: Memory hierarchy, thread execution, SIMD operations
 - **Mojo fundamentals**: Parameter functions, compile-time specialization,
-  capturing semantics
+  closure capture semantics
 - **TileTensor operations**: Loading, storing, and tensor manipulation
 - **GPU memory management**: Buffer allocation, host-device synchronization
 
@@ -94,12 +94,12 @@ Start with the foundation: automatic thread management and SIMD vectorization.
 - Functional GPU programming with `elementwise`
 - Automatic SIMD vectorization within GPU threads
 - TileTensor operations for safe memory access
-- Capturing semantics in nested functions
+- Capture semantics in nested closures
 
 **Key pattern:**
 
 ```mojo
-elementwise[add_function, SIMD_WIDTH, target="gpu"](total_size, ctx)
+elementwise[simd_width=SIMD_WIDTH, target="gpu"](add_function, Coord(total_size), ctx)
 ```
 
 ### **2. Tiled processing**

@@ -3,7 +3,7 @@
 > **Note: This section is specific to NVIDIA GPUs**
 >
 > Bank conflict analysis and profiling techniques covered here apply
-> specifically to NVIDIA GPUs. The profiling commands use NSight Compute tools
+> specifically to NVIDIA GPUs. The profiling commands use Nsight Compute tools
 > that are part of the NVIDIA CUDA toolkit.
 
 ## Building on your profiling skills
@@ -15,9 +15,9 @@ detective skills to a new performance mystery: **shared memory bank conflicts**.
 
 **The detective challenge:** You have two GPU kernels that perform identical
 mathematical operations (`(input + 10) * 2`). Both produce exactly the same
-results. Both use the same amount of shared memory. Both have identical
-occupancy. Yet one experiences systematic performance degradation due to **how**
-it accesses shared memory.
+results. Yet one experiences systematic performance degradation due to **how**
+it accesses shared memory—the conflicting kernel also reserves twice the
+shared memory (`2 * TPB` against `TPB`) to make room for its strided pattern.
 
 **Your mission:** Use the profiling methodology you've learned to uncover this
 hidden performance trap and understand when bank conflicts matter in real-world
@@ -47,7 +47,7 @@ systematic profiling analysis.
 
 **Requirements:**
 
-- NVIDIA GPU with CUDA toolkit and NSight Compute from
+- NVIDIA GPU with CUDA toolkit and Nsight Compute from
   [Puzzle 30](../puzzle_30/puzzle_30.md)
 - Understanding of shared memory banking concepts from the
   [previous section](./shared_memory_bank.md)
@@ -61,8 +61,9 @@ comptime BLOCKS_PER_GRID = (SIZE // TPB, 1)  # 32 blocks
 ```
 
 **Key insight:** The problem size is deliberately smaller than previous puzzles
-to highlight shared memory effects rather than global memory bandwidth
-limitations.
+so the bank-conflict counters are easy to read. It is not small enough to make
+shared memory the bottleneck, though—as Step 2 shows, global memory still
+dominates the measured time.
 
 ## The investigation
 
@@ -94,7 +95,7 @@ mojo build --debug-level=full problems/p32/p32.mojo -o problems/p32/p32_profiler
 
 ### Step 4: Profile bank conflicts
 
-Use NSight Compute to measure shared memory bank conflicts quantitatively:
+Use Nsight Compute to measure shared memory bank conflicts quantitatively:
 
 ```bash
 # Profile no-conflict kernel
@@ -130,9 +131,9 @@ shared_buf[thread_idx.x]  # Thread 0→Index 0, Thread 1→Index 1, etc.
 **Two-way conflict kernel access pattern:**
 
 ```mojo
-# Thread mapping with stride-2 modulo operation
-shared_buf[(thread_idx.x * 2) % TPB]
-# For threads 0-31: Index 0,2,4,6,...,62, then wraps to 64,66,...,126, then 0,2,4...
+# Thread mapping with stride-2 access into a 2*TPB buffer
+shared_buf[thread_idx.x * 2]
+# For threads 0-31: Index 0,2,4,6,...,62 - no wraparound, the buffer is 2*TPB
 # Bank mapping examples:
 # Thread 0  → Index 0   → Bank 0
 # Thread 16 → Index 32  → Bank 0  (conflict!)
@@ -170,8 +171,8 @@ questions:**
 
 10. Why does the two-way conflict kernel show measurable conflicts while the
     no-conflict kernel shows zero?
-11. How does the stride-2 access pattern `(thread_idx.x * 2) % TPB` create
-    systematic conflicts?
+11. How does the stride-2 access pattern `thread_idx.x * 2` create systematic
+    conflicts?
 12. Why do bank conflicts matter more in compute-intensive kernels than
     memory-bound kernels?
 
@@ -191,7 +192,7 @@ questions:**
 
 **Bank conflict detective toolkit:**
 
-- **NSight Compute metrics** - Quantify conflicts with precise measurements
+- **Nsight Compute metrics** - Quantify conflicts with precise measurements
 - **Access pattern visualization** - Map thread indices to banks systematically
 - **Mathematical analysis** - Use modulo arithmetic to predict conflicts
 - **Workload characteristics** - Understand when conflicts matter vs when they
@@ -212,16 +213,17 @@ questions:**
 
 1. **Map threads to indices:** Understand the mathematical address calculation
 2. **Calculate bank assignments:** Use the formula
-   `bank_id = (address / 4) % 32`
+   `bank_id = (address_bytes / 4) % 32`
 3. **Identify conflicts:** Look for multiple threads accessing the same bank
-4. **Validate with profiling:** Confirm theoretical analysis with NSight Compute
+4. **Validate with profiling:** Confirm theoretical analysis with Nsight Compute
    measurements
 
 **Common conflict-free patterns:**
 
 - **Sequential access:** `shared[thread_idx.x]` - each thread different bank
 - **Broadcast access:** `shared[0]` for all threads - hardware optimization
-- **Power-of-2 strides:** Stride-32 often maps cleanly to banking patterns
+- **Odd strides:** An odd element stride visits all 32 banks before repeating;
+  a stride of 32 puts every lane on bank 0, the worst case
 - **Padded arrays:** Add padding to shift problematic access patterns
 
 </div>
@@ -248,18 +250,21 @@ Both kernels produce identical mathematical results:
 ```
 
 **Step 2: Performance Baseline**
-Benchmark results show similar execution times:
+Benchmark results show similar execution times (B200, MAX 26.5.0 / Mojo 1.0.0 —
+your absolute times will differ, their closeness is the finding):
 
 ```text
-| name             | met (ms)           | iters |
-| ---------------- | ------------------ | ----- |
-| no_conflict      | 2.1930616745886655 | 547   |
-| two_way_conflict | 2.1978922967032966 | 546   |
+| name             | met (ms)             | iters |
+| ---------------- | -------------------- | ----- |
+| no_conflict      | 0.010562229999999999 | 100   |
+| two_way_conflict | 0.010872310000000001 | 100   |
 ```
 
-**Key insight:** Performance is nearly identical (~2.19ms vs ~2.20ms) because
-this workload is **global memory bound** rather than shared memory bound. Bank
-conflicts become visible through profiling metrics rather than execution time.
+**Key insight:** Performance is nearly identical (~0.0106 ms vs ~0.0109 ms)
+because this workload is **global memory bound** rather than shared memory
+bound. The 3% between the two kernels is inside run-to-run noise — do not read
+a winner into it, in either direction. Bank conflicts become visible through
+profiling metrics rather than execution time.
 
 ## **Bank conflict profiling evidence**
 
@@ -299,11 +304,11 @@ shared_buf[thread_idx.x]
 **Bank assignment analysis:**
 
 ```text
-Thread 0  → Index 0   → Bank 0 % 32 = 0
-Thread 1  → Index 1   → Bank 1 % 32 = 1
-Thread 2  → Index 2   → Bank 2 % 32 = 2
+Thread 0  → Index 0   → 0 % 32  → Bank 0
+Thread 1  → Index 1   → 1 % 32  → Bank 1
+Thread 2  → Index 2   → 2 % 32  → Bank 2
 ...
-Thread 31 → Index 31  → Bank 31 % 32 = 31
+Thread 31 → Index 31  → 31 % 32 → Bank 31
 ```
 
 **Result:** Perfect bank distribution - each thread accesses a different bank
@@ -314,27 +319,28 @@ within each warp, enabling parallel access.
 **Thread-to-index mapping:**
 
 ```mojo
-shared_buf[(thread_idx.x * 2) % TPB]  # TPB = 256
+shared_buf[thread_idx.x * 2]  # buffer sized 2 * TPB = 512
 ```
 
 **Bank assignment analysis for first warp (threads 0-31):**
 
 ```text
-Thread 0  → Index (0*2)%256 = 0   → Bank 0
-Thread 1  → Index (1*2)%256 = 2   → Bank 2
-Thread 2  → Index (2*2)%256 = 4   → Bank 4
+Thread 0  → Index 0*2  = 0   → Bank 0
+Thread 1  → Index 1*2  = 2   → Bank 2
+Thread 2  → Index 2*2  = 4   → Bank 4
 ...
-Thread 16 → Index (16*2)%256 = 32 → Bank 0  ← CONFLICT with Thread 0
-Thread 17 → Index (17*2)%256 = 34 → Bank 2  ← CONFLICT with Thread 1
-Thread 18 → Index (18*2)%256 = 36 → Bank 4  ← CONFLICT with Thread 2
+Thread 16 → Index 16*2 = 32  → Bank 0  ← CONFLICT with Thread 0
+Thread 17 → Index 17*2 = 34  → Bank 2  ← CONFLICT with Thread 1
+Thread 18 → Index 18*2 = 36  → Bank 4  ← CONFLICT with Thread 2
 ...
 ```
 
-**Conflict pattern:** Each bank serves exactly 2 threads, creating systematic
-2-way conflicts across all 32 banks.
+**Conflict pattern:** Because every index is even, a warp touches only the 16
+even-numbered banks (0, 2, ..., 30); the odd banks go unused. Each of those
+banks serves exactly 2 threads, creating systematic 2-way conflicts.
 
-**Mathematical explanation:** The stride-2 pattern with modulo 256 creates a
-repeating access pattern where:
+**Mathematical explanation:** The stride-2 pattern maps a warp's 32 lanes onto
+16 banks, creating a repeating access pattern where:
 
 - Threads 0-15 access banks 0,2,4,...,30
 - Threads 16-31 access the **same banks** 0,2,4,...,30
@@ -370,24 +376,32 @@ repeating access pattern where:
 **Matrix Multiplication:**
 
 ```mojo
-# Problematic: All threads in warp access same column
+# Problematic: when a warp varies local_row, a_shared[local_row, k] strides by
+# tile_size, so a multiple-of-32 tile_size lands every lane on one bank
 for k in range(tile_size):
-    acc += a_shared[local_row, k] * b_shared[k, local_col]  # b_shared[k, 0] conflicts
+    acc += a_shared[local_row, k] * b_shared[k, local_col]
 ```
 
 **Stencil Computations:**
 
 ```mojo
-# Problematic: Stride access in boundary handling
-shared_buf[thread_idx.x * stride]  # Creates systematic conflicts
+# Problematic: an even stride in boundary handling. An odd stride would still
+# reach all 32 banks; an even one folds the warp onto a subset of them.
+shared_buf[thread_idx.x * stride]
 ```
 
 **Parallel Reductions:**
 
 ```mojo
-# Problematic: Power-of-2 stride patterns
+# Problematic: interleaved addressing multiplies the thread index by the stride,
+# so at stride 16 an entire warp lands on bank 0
+var index = 2 * stride * thread_idx.x
+if index < TPB:
+    shared_buf[index] += shared_buf[index + stride]
+
+# Conflict-free: sequential addressing keeps the active lanes contiguous
 if thread_idx.x < stride:
-    shared_buf[thread_idx.x] += shared_buf[thread_idx.x + stride]  # Conflict potential
+    shared_buf[thread_idx.x] += shared_buf[thread_idx.x + stride]
 ```
 
 ## **Conflict-free design principles**
@@ -403,13 +417,16 @@ shared[thread_idx.x]  # Optimal - each thread different bank
 **2. Broadcast optimization:**
 
 ```mojo
-constant = shared[0]  # All threads read same address - hardware optimized
+var constant = shared[0]  # All threads read same address - hardware optimized
 ```
 
 **3. Padding techniques:**
 
 ```mojo
-shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_major[TPB + 1]())  # Shift access patterns
+# Pad the row stride so column-wise access walks all 32 banks
+var shared = stack_allocation[
+    dtype=dtype, address_space=AddressSpace.SHARED
+](row_major[TPB, TPB + 1]())
 ```
 
 **4. Access pattern analysis:**
@@ -429,7 +446,7 @@ shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_ma
 
 **Implementation Phase:**
 
-1. **Profile systematically** - Use NSight Compute conflict metrics
+1. **Profile systematically** - Use Nsight Compute conflict metrics
 2. **Measure impact** - Compare conflict counts across implementations
 3. **Validate performance** - Ensure optimizations improve end-to-end
    performance
@@ -442,7 +459,7 @@ shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_ma
 1. **Measurement trumps intuition** - Profiling tools reveal conflicts invisible
    to performance timing
 2. **Pattern analysis works** - Mathematical prediction accurately matched
-   NSight Compute results
+   Nsight Compute results
 3. **Context matters** - Bank conflicts matter most in compute-intensive shared
    memory workloads
 4. **Prevention beats fixing** - Designing conflict-free patterns easier than
@@ -455,7 +472,7 @@ shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_ma
 - **High-computation kernels** using shared memory for data reuse
 - **Iterative algorithms** with repeated shared memory access in tight loops
 - **Performance-critical code** where every cycle matters
-- **Memory-intensive operations** that are compute-bound rather than
+- **Shared-memory-intensive operations** that are compute-bound rather than
   bandwidth-bound
 
 **When bank conflicts are less critical:**
@@ -466,7 +483,7 @@ shared = stack_allocation[dtype=dtype, address_space=AddressSpace.SHARED](row_ma
 
 **Professional development methodology:**
 
-1. **Profile before optimizing** - Measure conflicts quantitatively with NSight
+1. **Profile before optimizing** - Measure conflicts quantitatively with Nsight
    Compute
 2. **Understand access mathematics** - Use bank assignment formulas to predict
    problems

@@ -1,11 +1,19 @@
 # ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026, Modular Inc. All rights reserved.
 #
-# This file is Modular Inc proprietary.
+# Licensed under the Apache License v2.0 with LLVM Exceptions:
+# https://llvm.org/LICENSE.txt
 #
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ===----------------------------------------------------------------------=== #
-from std.gpu import thread_idx, block_idx, block_dim, grid_dim, barrier
-from std.gpu.host import DeviceContext
-from std.gpu.memory import async_copy_wait_all, AddressSpace
+from std.gpu import thread_idx, block_idx, block_dim, grid_dim
+from max.gpu.sync import barrier
+from max.gpu.host import DeviceContext
+from max.gpu.memory import async_copy_wait_all
 from layout import Layout, LayoutTensor, TileTensor
 from layout.tile_layout import row_major
 from layout.tile_tensor import stack_allocation
@@ -48,13 +56,13 @@ def async_copy_overlap_convolution[
         dtype,
         Layout.row_major(CONV_TILE_SIZE),
         MutAnyOrigin,
-        address_space=AddressSpace.SHARED,
+        address_space=.SHARED,
     ].stack_allocation()
     var kernel_shared = LayoutTensor[
         dtype,
         Layout.row_major(KERNEL_SIZE),
         MutAnyOrigin,
-        address_space=AddressSpace.SHARED,
+        address_space=.SHARED,
     ].stack_allocation()
 
     # FILL IN HERE (roughly 19 lines)
